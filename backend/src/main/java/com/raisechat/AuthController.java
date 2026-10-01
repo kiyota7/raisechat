@@ -1,0 +1,110 @@
+package com.raisechat;
+
+import jakarta.validation.Valid;
+import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.Pattern;
+import jakarta.validation.constraints.Size;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+import org.springframework.dao.DuplicateKeyException;
+import org.springframework.http.HttpStatus;
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
+import org.springframework.web.bind.annotation.*;
+import org.springframework.web.multipart.MultipartFile;
+
+@RestController
+@RequestMapping("/api")
+public class AuthController {
+	private static final String USER_SQL =
+			"SELECT id, username, display_name AS displayName, status, avatar_url AS avatarUrl FROM users WHERE id = ?";
+
+	private final JdbcTemplate jdbc;
+	private final JwtService jwt;
+	private final FileStorage storage;
+	private final BCryptPasswordEncoder encoder = new BCryptPasswordEncoder();
+
+	public AuthController(JdbcTemplate jdbc, JwtService jwt, FileStorage storage) {
+		this.jdbc = jdbc;
+		this.jwt = jwt;
+		this.storage = storage;
+	}
+
+	public record RegisterRequest(
+			@NotBlank(message = "ユーザーIDを入力してください")
+			@Pattern(regexp = "[A-Za-z0-9_]{3,20}", message = "ユーザーIDは半角英数字とアンダースコアの3〜20文字で入力してください") String username,
+			@NotBlank(message = "パスワードを入力してください")
+			@Size(min = 8, max = 64, message = "パスワードは8〜64文字で入力してください") String password,
+			@Size(max = 30, message = "表示名は30文字以内で入力してください") String displayName) {
+	}
+
+	public record LoginRequest(@NotBlank(message = "ユーザーIDを入力してください") String username,
+			@NotBlank(message = "パスワードを入力してください") String password) {
+	}
+
+	public record ProfileRequest(
+			@NotBlank(message = "表示名を入力してください") @Size(max = 30, message = "表示名は30文字以内で入力してください") String displayName,
+			@Size(max = 100, message = "ステータスは100文字以内で入力してください") String status) {
+	}
+
+	@PostMapping("/auth/register")
+	public Map<String, Object> register(@Valid @RequestBody RegisterRequest req) {
+		String display = req.displayName() == null || req.displayName().isBlank() ? req.username() : req.displayName().trim();
+		try {
+			jdbc.update("INSERT INTO users (username, password_hash, display_name) VALUES (?, ?, ?)",
+					req.username(), encoder.encode(req.password()), display);
+		} catch (DuplicateKeyException e) {
+			throw new ApiException(HttpStatus.CONFLICT, "このユーザーIDは既に使われています");
+		} catch (org.springframework.dao.DataIntegrityViolationException e) {
+			throw new ApiException(HttpStatus.CONFLICT, "このユーザーIDは既に使われています");
+		}
+		Long id = jdbc.queryForObject("SELECT id FROM users WHERE username = ?", Long.class, req.username());
+		return session(id);
+	}
+
+	@PostMapping("/auth/login")
+	public Map<String, Object> login(@Valid @RequestBody LoginRequest req) {
+		List<Map<String, Object>> rows = jdbc.queryForList(
+				"SELECT id, password_hash FROM users WHERE username = ?", req.username());
+		if (rows.isEmpty() || !encoder.matches(req.password(), (String) rows.get(0).get("password_hash"))) {
+			throw new ApiException(HttpStatus.UNAUTHORIZED, "ユーザーIDまたはパスワードが正しくありません");
+		}
+		return session(((Number) rows.get(0).get("id")).longValue());
+	}
+
+	@GetMapping("/me")
+	public Map<String, Object> me(@RequestAttribute("userId") long uid) {
+		return user(uid);
+	}
+
+	@PutMapping("/me")
+	public Map<String, Object> updateMe(@RequestAttribute("userId") long uid, @Valid @RequestBody ProfileRequest req) {
+		jdbc.update("UPDATE users SET display_name = ?, status = ? WHERE id = ?",
+				req.displayName().trim(), req.status() == null ? "" : req.status().trim(), uid);
+		return user(uid);
+	}
+
+	@PostMapping("/me/avatar")
+	public Map<String, Object> avatar(@RequestAttribute("userId") long uid, @RequestParam("file") MultipartFile file) {
+		String url = storage.save(file, true).get("url");
+		jdbc.update("UPDATE users SET avatar_url = ? WHERE id = ?", url, uid);
+		return user(uid);
+	}
+
+	@PostMapping("/files")
+	public Map<String, String> upload(@RequestParam("file") MultipartFile file) {
+		return storage.save(file, false);
+	}
+
+	private Map<String, Object> user(long uid) {
+		return jdbc.queryForList(USER_SQL, uid).get(0);
+	}
+
+	private Map<String, Object> session(long uid) {
+		Map<String, Object> res = new LinkedHashMap<>();
+		res.put("token", jwt.issue(uid));
+		res.put("user", user(uid));
+		return res;
+	}
+}
