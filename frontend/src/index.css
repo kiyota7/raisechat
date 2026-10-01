@@ -12,6 +12,7 @@
   --primary-hover: #005e46;
   --danger: #c0262d;
   --mention-bg: #fff3c4;
+  --logo: #3f0e40;
   font-family: -apple-system, BlinkMacSystemFont, 'Hiragino Sans', 'Noto Sans JP', 'Segoe UI', sans-serif;
   color: var(--text);
   background: var(--bg);
@@ -25,6 +26,7 @@
     --text: #e8e8e8;
     --muted: #9a9ba0;
     --mention-bg: #4a3f10;
+    --logo: #d9a8db;
   }
 }
 
@@ -158,7 +160,7 @@ textarea {
 }
 .logo {
   margin: 0;
-  color: var(--side);
+  color: var(--logo);
 }
 .form {
   display: flex;
@@ -630,20 +632,128 @@ label.check input {
   z-index: 100;
 }
 
+.menu-btn,
+.nav-backdrop {
+  display: none;
+}
+
 @media (max-width: 800px) {
-  .sidebar {
-    width: 200px;
+  .app {
+    position: relative;
+    overflow: hidden;
   }
-  .thread {
-    position: absolute;
-    right: 0;
+  .sidebar {
+    position: fixed;
     top: 0;
     bottom: 0;
-    background: var(--bg);
-    width: min(360px, 100%);
-    z-index: 20;
+    left: 0;
+    width: min(280px, 85vw);
+    z-index: 40;
+    transform: translateX(-100%);
+    transition: transform 0.2s ease;
+  }
+  .sidebar.open {
+    transform: none;
+  }
+  .nav-backdrop {
+    display: block;
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.45);
+    z-index: 30;
+  }
+  .menu-btn {
+    display: inline-block;
+    position: relative;
+    font-size: 22px;
+    padding: 4px 8px;
+  }
+  .menu-dot {
+    position: absolute;
+    top: 2px;
+    right: 2px;
+    width: 9px;
+    height: 9px;
+    border-radius: 50%;
+    background: #e01e5a;
+  }
+  .topbar {
+    flex-wrap: wrap;
+    gap: 8px;
+    padding: 8px 12px;
+  }
+  .title {
+    font-size: 16px;
+    min-width: 0;
+    flex: 1;
+  }
+  .top-actions {
+    order: 3;
+    width: 100%;
+    overflow-x: auto;
+  }
+  .top-actions button {
+    white-space: nowrap;
+    padding: 4px 10px;
+    font-size: 13px;
   }
   .search {
+    order: 2;
+    display: block;
+    flex: 1 1 100%;
+    max-width: none;
+    margin-left: 0;
+  }
+  .thread {
+    position: fixed;
+    inset: 0;
+    width: 100%;
+    background: var(--bg);
+    z-index: 20;
+    border-left: 0;
+  }
+  .messages {
+    padding: 8px 10px;
+  }
+  .composer {
+    padding: 6px 10px 8px;
+  }
+  .hint {
     display: none;
+  }
+  .attachment {
+    max-width: 100%;
+  }
+  .msg {
+    flex-wrap: wrap;
+  }
+  .msg-actions {
+    display: flex;
+    position: static;
+    flex-basis: 100%;
+    margin-left: 46px;
+    border: 0;
+    padding: 0;
+    opacity: 0.75;
+  }
+  .picker {
+    top: auto;
+    bottom: 100%;
+    left: 46px;
+    right: auto;
+    flex-wrap: wrap;
+    max-width: calc(100vw - 70px);
+  }
+  .modal-backdrop {
+    align-items: flex-end;
+    padding: 0;
+  }
+  .modal {
+    max-width: none;
+    border-radius: 12px 12px 0 0;
+  }
+  .toast {
+    width: calc(100% - 32px);
+    text-align: center;
   }
 }

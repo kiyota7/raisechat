@@ -39,6 +39,7 @@ export function Chat({ user, onUserChange, onLogout }: Props) {
   const [searchText, setSearchText] = useState('')
   const [results, setResults] = useState<SearchResult[] | null>(null)
   const [toast, setToast] = useState('')
+  const [navOpen, setNavOpen] = useState(false)
   const lastRead = useRef(0)
   const prevMentions = useRef(0)
   const listEnd = useRef<HTMLDivElement>(null)
@@ -159,6 +160,7 @@ export function Chat({ user, onUserChange, onLogout }: Props) {
   const selectChannel = (id: number) => {
     setResults(null)
     setChannelId(id)
+    setNavOpen(false)
   }
 
   const openDm = async (userId: number) => {
@@ -200,7 +202,8 @@ export function Chat({ user, onUserChange, onLogout }: Props) {
 
   return (
     <div className="app">
-      <aside className="sidebar">
+      {navOpen && <div className="nav-backdrop" onClick={() => setNavOpen(false)} />}
+      <aside className={`sidebar${navOpen ? ' open' : ''}`}>
         <div className="side-head">
           <select
             aria-label="ワークスペース"
@@ -299,6 +302,10 @@ export function Chat({ user, onUserChange, onLogout }: Props) {
         ) : (
           <>
             <header className="topbar">
+              <button className="icon-btn menu-btn" aria-label="メニューを開く" onClick={() => setNavOpen(true)}>
+                ☰
+                {totalUnread > 0 && <span className="menu-dot" />}
+              </button>
               <div className="title">
                 {dm ? (
                   <strong>{dmUser?.displayName ?? 'DM'}</strong>
