@@ -32,10 +32,12 @@ public class MessageController {
 
 	private final JdbcTemplate jdbc;
 	private final Access access;
+	private final Realtime realtime;
 
-	public MessageController(JdbcTemplate jdbc, Access access) {
+	public MessageController(JdbcTemplate jdbc, Access access, Realtime realtime) {
 		this.jdbc = jdbc;
 		this.access = access;
+		this.realtime = realtime;
 	}
 
 	public record PostRequest(@Size(max = 5000, message = "メッセージは5000文字以内で入力してください") String content, Long parentId,
@@ -108,6 +110,7 @@ public class MessageController {
 		// 自分の投稿は既読扱いにする
 		jdbc.update("UPDATE channel_members SET last_read_message_id = ? WHERE channel_id = ? AND user_id = ? AND last_read_message_id < ?",
 				msgId, id, uid, msgId);
+		realtime.channelEvent(id, "created", msgId, parentId, true);
 		return enrich(new ArrayList<>(jdbc.queryForList(BASE_SQL + "WHERE m.id = ?", msgId))).get(0);
 	}
 
@@ -121,18 +124,22 @@ public class MessageController {
 		jdbc.update("DELETE FROM mentions WHERE message_id = ?", id);
 		Map<String, Object> ch = access.channel(((Number) m.get("channelId")).longValue());
 		saveMentions(id, content, ((Number) ch.get("workspaceId")).longValue());
+		realtime.channelEvent(((Number) m.get("channelId")).longValue(), "edited", id, parentOf(m), true);
 		return enrich(new ArrayList<>(jdbc.queryForList(BASE_SQL + "WHERE m.id = ?", id))).get(0);
 	}
 
 	@DeleteMapping("/messages/{id}")
+	@Transactional
 	public void delete(@RequestAttribute("userId") long uid, @PathVariable long id) {
-		ownMessage(uid, id);
+		Map<String, Object> m = ownMessage(uid, id);
 		jdbc.update("UPDATE messages SET deleted = 1, content = '', attachment_url = NULL, attachment_type = NULL WHERE id = ?", id);
 		jdbc.update("DELETE FROM mentions WHERE message_id = ?", id);
+		realtime.channelEvent(((Number) m.get("channelId")).longValue(), "deleted", id, parentOf(m), true);
 	}
 
 	/** 同じ絵文字を再度押すと取り消し */
 	@PostMapping("/messages/{id}/reactions")
+	@Transactional
 	public void react(@RequestAttribute("userId") long uid, @PathVariable long id, @Valid @RequestBody ReactionRequest req) {
 		Map<String, Object> m = access.message(id);
 		access.requireChannelMember(((Number) m.get("channelId")).longValue(), uid);
@@ -140,6 +147,7 @@ public class MessageController {
 		if (removed == 0) {
 			jdbc.update("INSERT INTO reactions (message_id, user_id, emoji) VALUES (?, ?, ?)", id, uid, req.emoji());
 		}
+		realtime.channelEvent(((Number) m.get("channelId")).longValue(), "reacted", id, parentOf(m), false);
 	}
 
 	private Map<String, Object> ownMessage(long uid, long id) {
@@ -151,6 +159,10 @@ public class MessageController {
 			throw new ApiException(HttpStatus.NOT_FOUND, "メッセージは削除されています");
 		}
 		return m;
+	}
+
+	private static Long parentOf(Map<String, Object> m) {
+		return m.get("parentId") == null ? null : ((Number) m.get("parentId")).longValue();
 	}
 
 	private static boolean isDeleted(Map<String, Object> m) {

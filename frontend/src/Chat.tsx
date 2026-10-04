@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react'
 import { api, uploadAvatar, type ThreadData } from './api'
+import { onReconnect, startRealtime, stopRealtime, subscribe } from './realtime'
 import { Avatar } from './Avatar'
 import { Composer, type Draft } from './Composer'
 import { MessageItem, formatTime } from './MessageItem'
@@ -7,17 +8,6 @@ import { Modal } from './Modal'
 import type { Message, Overview, SearchResult, User, Workspace } from './types'
 
 type ModalType = 'newWs' | 'newCh' | 'inviteWs' | 'inviteCh' | 'profile' | 'members' | 'channelMembers' | null
-
-function usePoll(fn: () => void | Promise<void>, ms: number, enabled: boolean) {
-  const ref = useRef(fn)
-  ref.current = fn
-  useEffect(() => {
-    if (!enabled) return
-    void ref.current()
-    const t = setInterval(() => void ref.current(), ms)
-    return () => clearInterval(t)
-  }, [ms, enabled])
-}
 
 interface Props {
   user: User
@@ -83,7 +73,9 @@ export function Chat({ user, onUserChange, onLogout }: Props) {
       if ((e as { status?: number }).status === 403) void loadWorkspaces()
     }
   }, [wsId, loadWorkspaces, showToast])
-  usePoll(loadOverview, 3000, !!wsId)
+  useEffect(() => {
+    if (wsId) void loadOverview()
+  }, [wsId, loadOverview])
 
   // 初期表示は #general (なければ最初のチャンネル)
   useEffect(() => {
@@ -121,7 +113,9 @@ export function Chat({ user, onUserChange, onLogout }: Props) {
       if ((e as { status?: number }).status === 403) setForbidden(true)
     }
   }, [channelId, canRead])
-  usePoll(loadMessages, 2000, canRead)
+  useEffect(() => {
+    if (canRead) void loadMessages()
+  }, [canRead, loadMessages])
 
   const loadThread = useCallback(async () => {
     if (!threadId) return
@@ -134,7 +128,52 @@ export function Chat({ user, onUserChange, onLogout }: Props) {
   useEffect(() => {
     setThread(null)
   }, [threadId])
-  usePoll(loadThread, 2000, !!threadId)
+  useEffect(() => {
+    if (threadId) void loadThread()
+  }, [threadId, loadThread])
+
+  // リアルタイム更新(STOMP)。イベントは再取得の合図で、データは従来のRESTで取り直す
+  useEffect(() => {
+    startRealtime()
+    return stopRealtime
+  }, [])
+
+  const live = useRef({ threadId, loadThread })
+  useEffect(() => {
+    live.current = { threadId, loadThread }
+  })
+
+  useEffect(() => {
+    if (!wsId) return
+    return subscribe('/user/queue/overview', (b) => {
+      if (b.workspaceId === wsId) void loadOverview()
+    })
+  }, [wsId, loadOverview])
+
+  useEffect(() => {
+    if (!channelId || !canRead) return
+    return subscribe(`/topic/channels/${channelId}`, (ev) => {
+      if (ev.type === 'channelDeleted') {
+        setChannelId(null)
+        void loadOverview()
+        return
+      }
+      void loadMessages()
+      const { threadId: t, loadThread: lt } = live.current
+      if (t && (ev.parentId === t || ev.messageId === t)) void lt()
+    })
+  }, [channelId, canRead, loadMessages, loadOverview])
+
+  // 切断中に取りこぼした更新を再接続時にまとめて回収する
+  useEffect(
+    () =>
+      onReconnect(() => {
+        void loadOverview()
+        void loadMessages()
+        void live.current.loadThread()
+      }),
+    [loadOverview, loadMessages],
+  )
 
   useEffect(() => {
     if (stickBottom.current) listEnd.current?.scrollIntoView({ block: 'end' })
