@@ -19,10 +19,12 @@ import org.springframework.web.bind.annotation.*;
 public class WorkspaceController {
 	private final JdbcTemplate jdbc;
 	private final Access access;
+	private final Realtime realtime;
 
-	public WorkspaceController(JdbcTemplate jdbc, Access access) {
+	public WorkspaceController(JdbcTemplate jdbc, Access access, Realtime realtime) {
 		this.jdbc = jdbc;
 		this.access = access;
+		this.realtime = realtime;
 	}
 
 	public record NameRequest(@NotBlank(message = "名前を入力してください") @Size(max = 30, message = "名前は30文字以内で入力してください") String name) {
@@ -97,6 +99,7 @@ public class WorkspaceController {
 		jdbc.update("INSERT OR IGNORE INTO channel_members (channel_id, user_id, last_read_message_id) "
 				+ "SELECT id, ?, IFNULL((SELECT MAX(id) FROM messages WHERE channel_id = channels.id), 0) "
 				+ "FROM channels WHERE workspace_id = ? AND name = 'general' AND is_dm = 0", target, id);
+		realtime.overviewToWorkspace(id);
 		return Map.of("userId", target);
 	}
 
@@ -110,6 +113,9 @@ public class WorkspaceController {
 		jdbc.update("DELETE FROM channel_members WHERE user_id = ? AND channel_id IN (SELECT id FROM channels WHERE workspace_id = ?)",
 				userId, id);
 		jdbc.update("DELETE FROM workspace_members WHERE workspace_id = ? AND user_id = ?", id, userId);
+		List<Long> notify = new java.util.ArrayList<>(realtime.workspaceMembers(id));
+		notify.add(userId);
+		realtime.overviewToUsers(id, notify);
 	}
 
 	@PostMapping("/workspaces/{id}/channels")
@@ -126,6 +132,9 @@ public class WorkspaceController {
 		long chId = insert("INSERT INTO channels (workspace_id, name, is_private, is_dm) VALUES (?, ?, ?, 0)",
 				id, name, req.isPrivate() ? 1 : 0);
 		jdbc.update("INSERT INTO channel_members (channel_id, user_id) VALUES (?, ?)", chId, uid);
+		if (!req.isPrivate()) {
+			realtime.overviewToWorkspace(id);
+		}
 		return access.channel(chId);
 	}
 
@@ -153,6 +162,7 @@ public class WorkspaceController {
 			chId = insert("INSERT INTO channels (workspace_id, name, is_private, is_dm) VALUES (?, ?, 1, 1)", id,
 					"dm-" + Math.min(uid, req.userId()) + "-" + Math.max(uid, req.userId()));
 			jdbc.update("INSERT INTO channel_members (channel_id, user_id) VALUES (?, ?), (?, ?)", chId, uid, chId, req.userId());
+			realtime.overviewToUsers(id, List.of(req.userId()));
 		} else {
 			chId = existing.get(0);
 		}

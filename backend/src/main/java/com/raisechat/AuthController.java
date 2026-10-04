@@ -23,12 +23,14 @@ public class AuthController {
 	private final JdbcTemplate jdbc;
 	private final JwtService jwt;
 	private final FileStorage storage;
+	private final Realtime realtime;
 	private final BCryptPasswordEncoder encoder = new BCryptPasswordEncoder();
 
-	public AuthController(JdbcTemplate jdbc, JwtService jwt, FileStorage storage) {
+	public AuthController(JdbcTemplate jdbc, JwtService jwt, FileStorage storage, Realtime realtime) {
 		this.jdbc = jdbc;
 		this.jwt = jwt;
 		this.storage = storage;
+		this.realtime = realtime;
 	}
 
 	public record RegisterRequest(
@@ -82,6 +84,7 @@ public class AuthController {
 	public Map<String, Object> updateMe(@RequestAttribute("userId") long uid, @Valid @RequestBody ProfileRequest req) {
 		jdbc.update("UPDATE users SET display_name = ?, status = ? WHERE id = ?",
 				req.displayName().trim(), req.status() == null ? "" : req.status().trim(), uid);
+		realtime.profileChanged(uid);
 		return user(uid);
 	}
 
@@ -89,6 +92,7 @@ public class AuthController {
 	public Map<String, Object> avatar(@RequestAttribute("userId") long uid, @RequestParam("file") MultipartFile file) {
 		String url = storage.save(file, true).get("url");
 		jdbc.update("UPDATE users SET avatar_url = ? WHERE id = ?", url, uid);
+		realtime.profileChanged(uid);
 		return user(uid);
 	}
 

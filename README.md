@@ -8,7 +8,7 @@ Slack風チャットアプリケーション(スクール上級編課題)。
 |---|---|
 | バックエンド | Java 21 / Spring Boot 3.5 / JdbcTemplate / Flyway / SQLite / JWT(jjwt) |
 | フロントエンド | React 19 + TypeScript / Vite / react-markdown(+GFM) |
-| リアルタイム更新 | ポーリング(メッセージ2秒・サイドバー/未読3秒) |
+| リアルタイム更新 | WebSocket (STOMP)。更新の合図のみ配信し、データはRESTで再取得。切断時は自動再接続 |
 
 ## 起動方法
 

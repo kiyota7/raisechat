@@ -12,10 +12,12 @@ import org.springframework.web.bind.annotation.*;
 public class ChannelController {
 	private final JdbcTemplate jdbc;
 	private final Access access;
+	private final Realtime realtime;
 
-	public ChannelController(JdbcTemplate jdbc, Access access) {
+	public ChannelController(JdbcTemplate jdbc, Access access, Realtime realtime) {
 		this.jdbc = jdbc;
 		this.access = access;
+		this.realtime = realtime;
 	}
 
 	/** パブリックチャンネルへの参加 */
@@ -27,6 +29,7 @@ public class ChannelController {
 			throw new ApiException(HttpStatus.FORBIDDEN, "プライベートチャンネルには招待が必要です");
 		}
 		addMember(id, uid);
+		realtime.overviewToUsers(((Number) ch.get("workspaceId")).longValue(), List.of(uid));
 	}
 
 	/** プライベートチャンネルへの招待(チャンネルメンバーが実行可能) */
@@ -44,6 +47,7 @@ public class ChannelController {
 			throw new ApiException(HttpStatus.NOT_FOUND, "ワークスペースにそのユーザーはいません");
 		}
 		addMember(id, ids.get(0));
+		realtime.overviewToUsers(((Number) ch.get("workspaceId")).longValue(), List.of(ids.get(0)));
 	}
 
 	@GetMapping("/{id}/members")
@@ -63,13 +67,16 @@ public class ChannelController {
 			throw new ApiException(HttpStatus.BAD_REQUEST, "このチャンネルは削除できません");
 		}
 		jdbc.update("DELETE FROM channels WHERE id = ?", id);
+		realtime.channelEvent(id, "channelDeleted", null, null, false);
+		realtime.overviewToWorkspace(((Number) ch.get("workspaceId")).longValue());
 	}
 
 	@PostMapping("/{id}/read")
 	public void markRead(@RequestAttribute("userId") long uid, @PathVariable long id) {
-		access.requireChannelMember(id, uid);
+		Map<String, Object> ch = access.requireChannelMember(id, uid);
 		jdbc.update("UPDATE channel_members SET last_read_message_id = IFNULL((SELECT MAX(id) FROM messages WHERE channel_id = ?), 0) "
 				+ "WHERE channel_id = ? AND user_id = ?", id, id, uid);
+		realtime.overviewToUsers(((Number) ch.get("workspaceId")).longValue(), List.of(uid));
 	}
 
 	private void addMember(long channelId, long userId) {
