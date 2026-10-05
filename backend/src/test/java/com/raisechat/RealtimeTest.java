@@ -153,4 +153,24 @@ class RealtimeTest {
 		gs3.send("/topic/channels/" + general, Map.of("type", "fake"));
 		assertNotNull(g3.error.get(5, TimeUnit.SECONDS));
 	}
+	@Test
+	void profileChangeNotifiesWorkspaceMembersWithProfileType() throws Exception {
+		String sfx = UUID.randomUUID().toString().substring(0, 6);
+		String owner = "pown_" + sfx, guest = "pgst_" + sfx;
+		String ot = register(owner), gt = register(guest);
+		long ws = call("POST", "/workspaces", ot, "{\"name\":\"WS\"}").get("id").asLong();
+		call("POST", "/workspaces/" + ws + "/invite", ot, "{\"username\":\"" + guest + "\"}");
+
+		Handler g = connect(gt);
+		StompSession gs = g.connected.get(5, TimeUnit.SECONDS);
+		BlockingQueue<Map<String, Object>> overview = subscribe(gs, "/user/queue/overview");
+		Thread.sleep(300);
+		overview.clear();
+		call("PUT", "/me", ot, "{\"displayName\":\"Renamed\",\"status\":\"\"}");
+
+		Map<String, Object> ev = overview.poll(5, TimeUnit.SECONDS);
+		assertNotNull(ev);
+		assertEquals("profile", ev.get("type"));
+		assertEquals(ws, ((Number) ev.get("workspaceId")).longValue());
+	}
 }
