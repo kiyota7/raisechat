@@ -40,8 +40,12 @@ public class Realtime {
 	}
 
 	public void overviewToUsers(long workspaceId, Collection<Long> userIds) {
+		overviewToUsers(workspaceId, userIds, "overview");
+	}
+
+	private void overviewToUsers(long workspaceId, Collection<Long> userIds, String type) {
 		List<Long> users = List.copyOf(userIds);
-		afterCommit(() -> sendOverview(workspaceId, users));
+		afterCommit(() -> sendOverview(workspaceId, users, type));
 	}
 
 	public void overviewToWorkspace(long workspaceId) {
@@ -52,11 +56,11 @@ public class Realtime {
 		overviewToUsers(workspaceOf(channelId), channelMembers(channelId));
 	}
 
-	/** プロフィール変更を、所属ワークスペースの全メンバーに伝える */
+	/** プロフィール変更を、所属ワークスペースの全メンバーに伝える。投稿者名・アバターはメッセージ本体に含まれるため、種別profileで一覧の取り直しも促す */
 	public void profileChanged(long userId) {
 		List<Long> wsIds = jdbc.queryForList("SELECT workspace_id FROM workspace_members WHERE user_id = ?", Long.class, userId);
 		for (long wsId : wsIds) {
-			overviewToWorkspace(wsId);
+			overviewToUsers(wsId, workspaceMembers(wsId), "profile");
 		}
 	}
 
@@ -74,8 +78,13 @@ public class Realtime {
 	}
 
 	private void sendOverview(long workspaceId, Collection<Long> userIds) {
+		sendOverview(workspaceId, userIds, "overview");
+	}
+
+	private void sendOverview(long workspaceId, Collection<Long> userIds, String type) {
+		Map<String, Object> payload = Map.of("type", type, "workspaceId", workspaceId);
 		for (long uid : userIds) {
-			template.convertAndSendToUser(String.valueOf(uid), "/queue/overview", Map.of("workspaceId", workspaceId));
+			template.convertAndSendToUser(String.valueOf(uid), "/queue/overview", payload);
 		}
 	}
 

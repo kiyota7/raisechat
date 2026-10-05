@@ -146,9 +146,15 @@ export function Chat({ user, onUserChange, onLogout }: Props) {
   useEffect(() => {
     if (!wsId) return
     return subscribe('/user/queue/overview', (b) => {
-      if (b.workspaceId === wsId) void loadOverview()
+      if (b.workspaceId !== wsId) return
+      void loadOverview()
+      // 投稿者名・アバターはメッセージ本体に含まれるため、プロフィール変更時は一覧も取り直す
+      if (b.type === 'profile') {
+        void loadMessages()
+        void live.current.loadThread()
+      }
     })
-  }, [wsId, loadOverview])
+  }, [wsId, loadOverview, loadMessages])
 
   useEffect(() => {
     if (!channelId || !canRead) return
