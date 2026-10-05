@@ -15,6 +15,22 @@ public class Sql {
 		this.jdbc = jdbc;
 	}
 
+	/**
+	 * 一意制約(UNIQUE / PRIMARY KEY)に違反した例外かどうかを返す。
+	 * SQLiteの制約違反は、Springの例外変換で DuplicateKeyException にならず UncategorizedSQLException のままになるため、
+	 * 原因の SQLiteException の結果コードで判定する。
+	 */
+	public static boolean isUniqueViolation(Throwable e) {
+		for (Throwable t = e; t != null; t = t.getCause()) {
+			if (t instanceof org.sqlite.SQLiteException se) {
+				org.sqlite.SQLiteErrorCode code = se.getResultCode();
+				return code == org.sqlite.SQLiteErrorCode.SQLITE_CONSTRAINT_UNIQUE
+						|| code == org.sqlite.SQLiteErrorCode.SQLITE_CONSTRAINT_PRIMARYKEY;
+			}
+		}
+		return false;
+	}
+
 	/** INSERTを実行し、生成されたIDを返す。nullの引数はNULLとして入る */
 	public long insert(String sql, Object... args) {
 		GeneratedKeyHolder kh = new GeneratedKeyHolder();

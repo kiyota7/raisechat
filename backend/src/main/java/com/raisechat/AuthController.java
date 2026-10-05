@@ -8,6 +8,8 @@ import jakarta.validation.constraints.Size;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import org.springframework.dao.DataAccessException;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.http.HttpStatus;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -18,6 +20,7 @@ import org.springframework.web.multipart.MultipartFile;
 @RestController
 @RequestMapping("/api")
 public class AuthController {
+	private static final String USERNAME_TAKEN = "このユーザーIDは既に使われています";
 	private static final String USER_SQL =
 			"SELECT id, username, display_name AS displayName, status, avatar_url AS avatarUrl FROM users WHERE id = ?";
 
@@ -61,13 +64,20 @@ public class AuthController {
 			throw new ApiException(HttpStatus.BAD_REQUEST, msg);
 		});
 		String display = req.displayName() == null || req.displayName().isBlank() ? req.username() : req.displayName().trim();
+		// 先に確認する(使われていれば、パスワードのハッシュ化という重い計算をせずに済む)
+		Integer taken = jdbc.queryForObject("SELECT COUNT(*) FROM users WHERE username = ?", Integer.class, req.username());
+		if (taken != null && taken > 0) {
+			throw new ApiException(HttpStatus.CONFLICT, USERNAME_TAKEN);
+		}
 		try {
 			jdbc.update("INSERT INTO users (username, password_hash, display_name) VALUES (?, ?, ?)",
 					req.username(), encoder.encode(req.password()), display);
-		} catch (DuplicateKeyException e) {
-			throw new ApiException(HttpStatus.CONFLICT, "このユーザーIDは既に使われています");
-		} catch (org.springframework.dao.DataIntegrityViolationException e) {
-			throw new ApiException(HttpStatus.CONFLICT, "このユーザーIDは既に使われています");
+		} catch (DataAccessException e) {
+			// 同時に同じIDで登録が重なり、上の確認をすり抜けた場合
+			if (e instanceof DuplicateKeyException || e instanceof DataIntegrityViolationException || Sql.isUniqueViolation(e)) {
+				throw new ApiException(HttpStatus.CONFLICT, USERNAME_TAKEN);
+			}
+			throw e;
 		}
 		Long id = jdbc.queryForObject("SELECT id FROM users WHERE username = ?", Long.class, req.username());
 		return session(id);
