@@ -3,7 +3,6 @@ package com.raisechat;
 import java.security.Principal;
 import java.util.Map;
 import org.springframework.messaging.handler.annotation.MessageMapping;
-import org.springframework.messaging.simp.SimpMessagingTemplate;
 import org.springframework.stereotype.Controller;
 
 /**
@@ -15,11 +14,11 @@ public class TypingController {
 	public record TypingRequest(long channelId) {
 	}
 
-	private final SimpMessagingTemplate template;
+	private final MessageRelay relay;
 	private final Access access;
 
-	public TypingController(SimpMessagingTemplate template, Access access) {
-		this.template = template;
+	public TypingController(MessageRelay relay, Access access) {
+		this.relay = relay;
 		this.access = access;
 	}
 
@@ -34,6 +33,6 @@ public class TypingController {
 		} catch (ApiException e) {
 			return; // メンバーでない場合は黙って捨てる
 		}
-		template.convertAndSend("/topic/channels/" + req.channelId() + "/typing", Map.of("userId", uid));
+		relay.toTopic("/topic/channels/" + req.channelId() + "/typing", Map.of("userId", uid));
 	}
 }

@@ -9,7 +9,7 @@ Slack風チャットアプリケーション(スクール上級編課題)。
 | バックエンド | Java 21 / Spring Boot 3.5 / JdbcTemplate / Flyway / SQLite / JWT(jjwt) |
 | フロントエンド | React 19 + TypeScript / Vite / react-markdown(+GFM) |
 | ファイル保存 | 既定はローカルディスク。設定でAWS S3にも保存可能(下記「添付ファイルの保存先」) |
-| リアルタイム更新 | WebSocket (STOMP)。更新の合図のみ配信し、データはRESTで再取得。切断時は自動再接続 |
+| リアルタイム更新 | WebSocket (STOMP)。更新の合図のみ配信し、データはRESTで再取得。切断時は自動再接続。複数サーバーは、Redis Pub/Subで対応(下記「複数サーバーで動かす」) |
 
 ## 起動方法
 
@@ -34,7 +34,7 @@ GitHub Actions(`.github/workflows/ci.yml`)が、PRと `main` へのpushのたび
 
 | ジョブ | 内容 |
 |---|---|
-| Backend | `cd backend && mvn test`(Java 21) |
+| Backend | `cd backend && mvn test`(Java 21。複数サーバーのテストのため、Redisのサービスコンテナを使う) |
 | Frontend | `cd frontend && npm ci && npm run lint && npm test && npm run build`(Node 24) |
 
 手元で同じ確認をするには、上のコマンドをそのまま実行する。リントは `--deny-warnings` のため、**警告(warning)があっても失敗する**。やむを得ず抑制する場合は、`oxlint-disable-next-line` に理由のコメントを添える。
@@ -105,3 +105,38 @@ cd backend && mvn spring-boot:run
 - 設定: `app.login.max-failures`(5)、`app.login.ip-max-failures`(20)、`app.login.window-minutes`(15)。環境変数なら `APP_LOGIN_MAX_FAILURES` など
 - **失敗回数はサーバーのメモリ上**にある。再起動で消え、サーバーを複数台にする場合は、台ごとに数える(共有するにはRedisなどが必要)
 - **リバースプロキシ配下で使うとき:** 既定では接続元のIPをそのまま使うので、全員がプロキシのIPとして数えられ、IPごとの制限に巻き込まれる。プロキシが `X-Forwarded-For` を付ける構成なら、`server.forward-headers-strategy=native` を設定する(プロキシ以外から直接届かないことが前提。そうでないと、ヘッダーを偽って制限を回避される)
+
+## 複数サーバーで動かす(Redis)
+
+既定では、通知・オンライン状態・ログインの失敗回数が、**サーバー1台のメモリ上**にある。バックエンドを複数台にすると、別のサーバーに繋がっている人に通知が届かず、オンライン表示も見えない。`app.cluster.mode=redis` にすると、Redisで共有する。
+
+| 共有するもの | 仕組み |
+|---|---|
+| 通知(メッセージ・入力中・サイドバー更新など) | 各サーバーがRedisのチャンネル(`{prefix}:events`)に発行し、全サーバーが受信して、自分に繋がっている人へ届ける |
+| オンライン表示 | 全サーバーの接続を、有効期限(30秒)つきでRedisに記録する。各サーバーが10秒ごとに延ばし、サーバーが落ちても期限で消える。オンライン/オフラインの切り替えの通知は、複数のサーバーが同時に気づいても、1回だけ |
+| ログインの失敗回数 | Redisに記録し、全サーバーの失敗をまとめて数える |
+
+```bash
+# Redisを用意する(開発用)
+docker run -d --name raisechat-redis -p 6379:6379 redis:7-alpine
+
+# 全サーバー共通の設定
+export APP_CLUSTER_MODE=redis
+export SPRING_DATA_REDIS_HOST=localhost      # 既定のポートは6379(SPRING_DATA_REDIS_PORT)
+export JWT_SECRET='全サーバーで同じ値'          # 異なると、別のサーバーで発行したログインが無効になる
+
+# 1台目(固定ポート8080)
+cd backend && mvn spring-boot:run
+# 2台目(複数台を試すときだけ、別のポートで)
+cd backend && mvn spring-boot:run -Dspring-boot.run.arguments=--server.port=8081
+```
+
+設定: `app.cluster.mode`(`memory` 既定 / `redis`)、`app.cluster.key-prefix`(同じRedisを別の環境と共有するときの区別。既定 `raisechat`)、`app.cluster.presence-ttl-ms`(30000)、`app.cluster.presence-heartbeat-ms`(10000)。
+
+**制約と注意点**
+
+- **データベース:** SQLiteは、同じマシン上の複数プロセスなら、同じファイルを共有できる(WAL)。**別のマシンに分けるには、ネットワーク越しのDB(PostgreSQLなど)への移行が別途必要**
+- **添付ファイル:** ローカルディスク保存では、別のサーバーのファイルが見えない。複数台では、S3(上記)か、共有ストレージを使う
+- **Redisに繋がらないとき:** 起動時に繋がらなければ、**起動に失敗する**(他のサーバーと通知をやり取りできない状態で動かないため)。稼働中に繋がらなくなった場合は、**APIは止めずに続ける**(通知は届かない / 概要のオンライン状態は全員オフライン / ログインの制限はかからない。警告をログに出す)。繋がり直せば、通知は再開する。取りこぼした分は、クライアントの再接続時の再取得で補われる
+- **ログインの制限:** 確認と記録が別々の操作なので、同時に大量に送られた場合は、上限を数件超えて通ることがある
+- **テスト:** 複数サーバーのテスト(`ClusterRedisTest`)は、Redisに繋がる環境(既定 `localhost:6379`。環境変数 `REDIS_HOST` / `REDIS_PORT`)でだけ実行され、なければ飛ばされる。CIでは、Redisのサービスコンテナで実行する

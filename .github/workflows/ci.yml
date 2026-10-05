@@ -18,6 +18,17 @@ jobs:
     name: Backend (mvn test)
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    # 複数サーバー(Redis)のテスト(ClusterRedisTest)用。localhost:6379 で使える。なければ、そのテストは飛ばされる
+    services:
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
     defaults:
       run:
         working-directory: backend

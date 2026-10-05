@@ -1,35 +1,37 @@
 package com.raisechat;
 
+import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;
 import java.security.Principal;
 import java.util.Collection;
 import java.util.HashMap;
-import java.util.HashSet;
-import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.event.EventListener;
 import org.springframework.jdbc.core.JdbcTemplate;
-import org.springframework.messaging.simp.SimpMessagingTemplate;
 import org.springframework.messaging.simp.stomp.StompHeaderAccessor;
 import org.springframework.stereotype.Component;
 import org.springframework.web.socket.messaging.SessionConnectedEvent;
 import org.springframework.web.socket.messaging.SessionDisconnectEvent;
 
 /**
- * STOMP接続の有無からオンライン状態を管理する(メモリ上)。
- * 複数タブ/複数接続は、最後の接続が切れるまでオンラインとする。
+ * STOMP接続の有無からオンライン状態を管理し、変化を同じワークスペースのメンバーに伝える。
+ * 状態の保存先は PresenceStore(1台ならメモリ、複数台ならRedis)。
  * ページ再読み込みなどの一瞬の切断で表示が点滅しないよう、オフラインへの変更は猶予時間だけ遅らせる。
  */
 @Component
 public class PresenceService {
-	private final SimpMessagingTemplate template;
+	private static final Logger log = LoggerFactory.getLogger(PresenceService.class);
+
+	private final PresenceStore store;
+	private final MessageRelay relay;
 	private final JdbcTemplate jdbc;
 	private final long offlineGraceMs;
 	private final ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor(r -> {
@@ -38,16 +40,23 @@ public class PresenceService {
 		return t;
 	});
 
-	private final Map<String, Long> sessionUsers = new HashMap<>();
-	private final Map<Long, Set<String>> sessions = new HashMap<>();
-	private final Set<Long> online = new HashSet<>();
+	/** このサーバーで、猶予中(再接続を待っている)のユーザー */
 	private final Map<Long, ScheduledFuture<?>> pendingOffline = new HashMap<>();
 
-	public PresenceService(SimpMessagingTemplate template, JdbcTemplate jdbc,
+	public PresenceService(PresenceStore store, MessageRelay relay, JdbcTemplate jdbc,
 			@Value("${app.presence.offline-grace-ms:3000}") long offlineGraceMs) {
-		this.template = template;
+		this.store = store;
+		this.relay = relay;
 		this.jdbc = jdbc;
 		this.offlineGraceMs = offlineGraceMs;
+	}
+
+	@PostConstruct
+	void startMaintenance() {
+		long interval = store.maintenanceIntervalMs();
+		if (interval > 0) {
+			scheduler.scheduleWithFixedDelay(this::maintain, interval, interval, TimeUnit.MILLISECONDS);
+		}
 	}
 
 	@EventListener
@@ -58,61 +67,79 @@ public class PresenceService {
 			return;
 		}
 		long uid = Long.parseLong(user.getName());
-		boolean changed;
 		synchronized (this) {
-			sessionUsers.put(sessionId, uid);
-			sessions.computeIfAbsent(uid, k -> new LinkedHashSet<>()).add(sessionId);
 			ScheduledFuture<?> pending = pendingOffline.remove(uid);
 			if (pending != null) {
 				pending.cancel(false);
 			}
-			changed = online.add(uid);
 		}
-		if (changed) {
-			broadcast(uid, true);
+		try {
+			if (store.connect(uid, sessionId)) {
+				broadcast(uid, true);
+			}
+		} catch (RuntimeException e) {
+			log.warn("接続を記録できなかった(オンライン表示に反映されない): {}", e.toString());
 		}
 	}
 
 	@EventListener
 	public void onDisconnected(SessionDisconnectEvent event) {
-		String sessionId = event.getSessionId();
+		Long uid;
+		try {
+			uid = store.disconnect(event.getSessionId());
+		} catch (RuntimeException e) {
+			log.warn("切断を記録できなかった(期限が切れるまでオンライン表示が残る): {}", e.toString());
+			return;
+		}
+		if (uid == null) {
+			return;
+		}
+		// 猶予のあとで、有効な接続が残っていなければオフラインにする(別のサーバーでの再接続も、保存先の判定で分かる)
 		synchronized (this) {
-			Long uid = sessionUsers.remove(sessionId);
-			if (uid == null) {
-				return;
-			}
-			Set<String> set = sessions.get(uid);
-			if (set != null) {
-				set.remove(sessionId);
-				if (set.isEmpty()) {
-					sessions.remove(uid);
-					pendingOffline.put(uid, scheduler.schedule(() -> goOffline(uid), offlineGraceMs, TimeUnit.MILLISECONDS));
-				}
-			}
+			pendingOffline.put(uid, scheduler.schedule(() -> goOffline(uid), offlineGraceMs, TimeUnit.MILLISECONDS));
 		}
 	}
 
 	private void goOffline(long uid) {
-		boolean changed;
 		synchronized (this) {
 			pendingOffline.remove(uid);
-			if (sessions.containsKey(uid)) {
-				return;
+		}
+		try {
+			if (store.markOfflineIfNoConnection(uid)) {
+				broadcast(uid, false);
 			}
-			changed = online.remove(uid);
-		}
-		if (changed) {
-			broadcast(uid, false);
+		} catch (RuntimeException e) {
+			log.warn("オフラインへの切り替えに失敗した: {}", e.toString());
 		}
 	}
 
-	public synchronized boolean isOnline(long userId) {
-		return online.contains(userId);
+	/** 定期処理。保存先が共有(Redis)のときだけ動く */
+	private void maintain() {
+		try {
+			store.heartbeat().forEach(uid -> broadcast(uid, true));
+			store.sweep().forEach(uid -> broadcast(uid, false));
+		} catch (RuntimeException e) {
+			log.warn("オンライン状態の定期処理に失敗した: {}", e.toString());
+		}
 	}
 
-	/** 渡されたユーザーのうち、オンラインのIDだけを返す */
-	public synchronized List<Long> onlineAmong(Collection<Long> userIds) {
-		return userIds.stream().filter(online::contains).toList();
+	public boolean isOnline(long userId) {
+		try {
+			return store.isOnline(userId);
+		} catch (RuntimeException e) {
+			log.warn("オンライン状態を読めなかった: {}", e.toString());
+			return false;
+		}
+	}
+
+	/** 渡されたユーザーのうち、オンラインのIDだけを返す。保存先を読めないときは、全員オフラインとして続ける(概要のAPIを失敗させない) */
+	public List<Long> onlineAmong(Collection<Long> userIds) {
+		try {
+			return store.onlineAmong(userIds);
+		} catch (RuntimeException e) {
+			log.warn("オンライン状態を読めなかった: {}", e.toString());
+			return List.of();
+		}
 	}
 
 	/** 同じワークスペースに所属するメンバーにだけ、状態の変化を伝える */
@@ -122,7 +149,7 @@ public class PresenceService {
 				Long.class, uid);
 		Map<String, Object> payload = Map.of("userId", uid, "online", isOnline);
 		for (long peer : peers) {
-			template.convertAndSendToUser(String.valueOf(peer), "/queue/presence", payload);
+			relay.toUser(String.valueOf(peer), "/queue/presence", payload);
 		}
 	}
 
