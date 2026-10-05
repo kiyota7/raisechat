@@ -7,7 +7,14 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import java.util.ArrayList;
+import java.util.List;
 import java.util.UUID;
+import java.util.concurrent.Callable;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
@@ -107,5 +114,42 @@ class AuthSecurityTest {
 		String u = uniq("long");
 		register(u, GOOD).andExpect(status().isOk());
 		login(u, "x".repeat(500), "10.0.3.1").andExpect(status().isUnauthorized());
+	}
+	@Test
+	void registeringAnExistingUsernameReturnsConflictNotServerError() throws Exception {
+		String u = uniq("dup");
+		register(u, GOOD).andExpect(status().isOk());
+		register(u, GOOD).andExpect(status().isConflict()).andExpect(jsonPath("$.message").value("このユーザーIDは既に使われています"));
+		register(u, "Another-Pass-9z").andExpect(status().isConflict()); // パスワードが違っても同じ
+		// 別のユーザーIDなら、引き続き登録できる
+		register(uniq("dup"), GOOD).andExpect(status().isOk());
+	}
+
+	@Test
+	void simultaneousRegistrationsOfTheSameUsernameYieldOneSuccessAndConflictsOnly() throws Exception {
+		String u = uniq("race");
+		int n = 8;
+		ExecutorService pool = Executors.newFixedThreadPool(n);
+		CountDownLatch go = new CountDownLatch(1);
+		List<Future<Integer>> results = new ArrayList<>();
+		for (int i = 0; i < n; i++) {
+			Callable<Integer> task = () -> {
+				go.await();
+				return register(u, GOOD).andReturn().getResponse().getStatus();
+			};
+			results.add(pool.submit(task));
+		}
+		go.countDown(); // 全員を同時に開始する
+		int ok = 0, conflict = 0, other = 0;
+		for (Future<Integer> f : results) {
+			int st = f.get();
+			if (st == 200) ok++;
+			else if (st == 409) conflict++;
+			else other++;
+		}
+		pool.shutdown();
+		org.junit.jupiter.api.Assertions.assertEquals(1, ok, "登録できるのは1人だけ");
+		org.junit.jupiter.api.Assertions.assertEquals(n - 1, conflict, "残りは409(500になってはいけない)");
+		org.junit.jupiter.api.Assertions.assertEquals(0, other);
 	}
 }
