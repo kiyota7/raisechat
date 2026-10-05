@@ -1,17 +1,11 @@
 import { useState } from 'react'
 import { api } from './api'
 import { Avatar } from './Avatar'
+import { formatTime } from './format'
 import { Markdown } from './Markdown'
 import type { Message, User } from './types'
 
 const EMOJIS = ['👍', '❤️', '😂', '🎉', '🙏', '👀', '🔥', '✅']
-
-export function formatTime(iso: string) {
-  const d = new Date(iso)
-  const today = new Date()
-  const time = d.toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' })
-  return d.toDateString() === today.toDateString() ? time : `${d.toLocaleDateString('ja-JP')} ${time}`
-}
 
 interface Props {
   msg: Message
