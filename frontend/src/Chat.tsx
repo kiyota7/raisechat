@@ -3,7 +3,8 @@ import { api, uploadAvatar, type ThreadData } from './api'
 import { onReconnect, send, startRealtime, stopRealtime, subscribe } from './realtime'
 import { Avatar } from './Avatar'
 import { Composer, type Draft } from './Composer'
-import { MessageItem, formatTime } from './MessageItem'
+import { formatTime } from './format'
+import { MessageItem } from './MessageItem'
 import { Modal } from './Modal'
 import type { Message, Overview, SearchResult, User, Workspace } from './types'
 
@@ -23,7 +24,8 @@ export function Chat({ user, onUserChange, onLogout }: Props) {
   const [loaded, setLoaded] = useState(false)
   const [wsId, setWsId] = useState<number | null>(() => Number(localStorage.getItem('raisechat_ws')) || null)
   const [overview, setOverview] = useState<Overview | null>(null)
-  const [channelId, setChannelId] = useState<number | null>(null)
+  // 選択中のチャンネル。null のときは既定のチャンネル(下の channelId)を表示する
+  const [selectedChannelId, setChannelId] = useState<number | null>(null)
   const [messages, setMessages] = useState<Message[]>([])
   const [forbidden, setForbidden] = useState(false)
   const [threadId, setThreadId] = useState<number | null>(null)
@@ -55,15 +57,22 @@ export function Chat({ user, onUserChange, onLogout }: Props) {
   }, [])
 
   useEffect(() => {
+    // 非同期のデータ取得。setStateは await の後で呼ばれる
+    // oxlint-disable-next-line react/set-state-in-effect
     void loadWorkspaces()
   }, [loadWorkspaces])
 
-  useEffect(() => {
-    if (wsId) localStorage.setItem('raisechat_ws', String(wsId))
+  // ワークスペースを切り替えたら、前の画面の状態を捨てる(描画中の状態調整。effectで行うと一度古い状態を描画してしまう)
+  const [shownWsId, setShownWsId] = useState(wsId)
+  if (wsId !== shownWsId) {
+    setShownWsId(wsId)
     setChannelId(null)
     setOverview(null)
     setThreadId(null)
     setResults(null)
+  }
+  useEffect(() => {
+    if (wsId) localStorage.setItem('raisechat_ws', String(wsId))
     prevMentions.current = 0
   }, [wsId])
 
@@ -82,16 +91,16 @@ export function Chat({ user, onUserChange, onLogout }: Props) {
     }
   }, [wsId, loadWorkspaces, showToast])
   useEffect(() => {
+    // 非同期のデータ取得。setStateは await の後で呼ばれる
+    // oxlint-disable-next-line react/set-state-in-effect
     if (wsId) void loadOverview()
   }, [wsId, loadOverview])
 
-  // 初期表示は #general (なければ最初のチャンネル)
-  useEffect(() => {
-    if (overview && channelId === null) {
-      const first = overview.channels.find((c) => c.joined && c.name === 'general') ?? overview.channels.find((c) => c.joined)
-      if (first) setChannelId(first.id)
-    }
-  }, [overview, channelId])
+  // 選択がないときは #general (なければ最初の参加チャンネル)を表示する
+  const defaultChannel = overview
+    ? (overview.channels.find((c) => c.joined && c.name === 'general') ?? overview.channels.find((c) => c.joined))
+    : undefined
+  const channelId = selectedChannelId ?? defaultChannel?.id ?? null
 
   const channel = overview?.channels.find((c) => c.id === channelId)
   const dm = overview?.dms.find((d) => d.id === channelId)
@@ -99,10 +108,15 @@ export function Chat({ user, onUserChange, onLogout }: Props) {
   const isOwner = overview?.workspace.ownerId === user.id
   const canRead = !!channelId && (!!dm || channel?.joined === 1)
 
-  useEffect(() => {
+  // チャンネルを切り替えたら、前のチャンネルのメッセージとスレッドを捨てる(描画中の状態調整)
+  const [shownChannelId, setShownChannelId] = useState(channelId)
+  if (channelId !== shownChannelId) {
+    setShownChannelId(channelId)
     setMessages([])
     setForbidden(false)
     setThreadId(null)
+  }
+  useEffect(() => {
     lastRead.current = 0
     lastSeenMsg.current = 0
     stickBottom.current = true
@@ -133,6 +147,8 @@ export function Chat({ user, onUserChange, onLogout }: Props) {
     }
   }, [channelId, canRead])
   useEffect(() => {
+    // 非同期のデータ取得。setStateは await の後で呼ばれる
+    // oxlint-disable-next-line react/set-state-in-effect
     if (canRead) void loadMessages()
   }, [canRead, loadMessages])
 
@@ -144,10 +160,15 @@ export function Chat({ user, onUserChange, onLogout }: Props) {
       setThread(null)
     }
   }, [threadId])
-  useEffect(() => {
+  // 開くスレッドが変わったら、前のスレッドの内容を捨てる(描画中の状態調整)
+  const [shownThreadId, setShownThreadId] = useState(threadId)
+  if (threadId !== shownThreadId) {
+    setShownThreadId(threadId)
     setThread(null)
-  }, [threadId])
+  }
   useEffect(() => {
+    // 非同期のデータ取得。setStateは await の後で呼ばれる
+    // oxlint-disable-next-line react/set-state-in-effect
     if (threadId) void loadThread()
   }, [threadId, loadThread])
 
