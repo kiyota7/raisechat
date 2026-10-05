@@ -1,17 +1,18 @@
 import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react'
-import { api, uploadAvatar, type ThreadData } from './api'
-import { onReconnect, send, startRealtime, stopRealtime, subscribe } from './realtime'
-import { Avatar } from './Avatar'
-import { Composer, type Draft } from './Composer'
-import { formatTime } from './format'
-import { MessageItem } from './MessageItem'
-import { Modal } from './Modal'
+import { api, type ThreadData } from './api'
+import { send } from './realtime'
+import type { Draft } from './Composer'
+import { ChannelMembersModal, MembersModal, ProfileModal, TextModal } from './chat/modals'
+import { MessagePane } from './chat/MessagePane'
+import { SearchResults } from './chat/SearchResults'
+import { Sidebar } from './chat/Sidebar'
+import { ThreadPane } from './chat/ThreadPane'
+import { TopBar } from './chat/TopBar'
+import type { ModalType } from './chat/types'
+import { useChatRealtime } from './chat/useChatRealtime'
+import { useOnlineUsers } from './chat/useOnlineUsers'
+import { useTyping } from './chat/useTyping'
 import type { Message, Overview, SearchResult, User, Workspace } from './types'
-
-/** 最後の入力中通知からこの時間だけ「入力中」を表示する */
-const TYPING_SHOW_MS = 3500
-
-type ModalType = 'newWs' | 'newCh' | 'inviteWs' | 'inviteCh' | 'profile' | 'members' | 'channelMembers' | null
 
 interface Props {
   user: User
@@ -35,9 +36,7 @@ export function Chat({ user, onUserChange, onLogout }: Props) {
   const [results, setResults] = useState<SearchResult[] | null>(null)
   const [toast, setToast] = useState('')
   const [navOpen, setNavOpen] = useState(false)
-  const [onlineIds, setOnlineIds] = useState<Set<number>>(new Set())
-  const [typingIds, setTypingIds] = useState<number[]>([])
-  const typingTimers = useRef(new Map<number, ReturnType<typeof setTimeout>>())
+  const { onlineIds, replaceOnline } = useOnlineUsers()
   const lastSeenMsg = useRef(0)
   const lastRead = useRef(0)
   const prevMentions = useRef(0)
@@ -81,7 +80,7 @@ export function Chat({ user, onUserChange, onLogout }: Props) {
     try {
       const ov = await api.get<Overview>(`/workspaces/${wsId}`)
       setOverview(ov)
-      setOnlineIds(new Set(ov.onlineUserIds))
+      replaceOnline(ov.onlineUserIds)
       const mentions = [...ov.channels, ...ov.dms].reduce((s, c) => s + c.mentions, 0)
       if (mentions > prevMentions.current) showToast('メンションされました')
       prevMentions.current = mentions
@@ -89,7 +88,7 @@ export function Chat({ user, onUserChange, onLogout }: Props) {
       // キックされた場合などはワークスペース一覧を取り直す
       if ((e as { status?: number }).status === 403) void loadWorkspaces()
     }
-  }, [wsId, loadWorkspaces, showToast])
+  }, [wsId, loadWorkspaces, showToast, replaceOnline])
   useEffect(() => {
     // 非同期のデータ取得。setStateは await の後で呼ばれる
     // oxlint-disable-next-line react/set-state-in-effect
@@ -107,6 +106,8 @@ export function Chat({ user, onUserChange, onLogout }: Props) {
   const dmUser = dm ? overview?.members.find((m) => m.id === dm.userId) : undefined
   const isOwner = overview?.workspace.ownerId === user.id
   const canRead = !!channelId && (!!dm || channel?.joined === 1)
+
+  const { typingIds, clearTyping } = useTyping(channelId, canRead, user.id)
 
   // チャンネルを切り替えたら、前のチャンネルのメッセージとスレッドを捨てる(描画中の状態調整)
   const [shownChannelId, setShownChannelId] = useState(channelId)
@@ -132,11 +133,7 @@ export function Chat({ user, onUserChange, onLogout }: Props) {
         lastSeenMsg.current = last
         // 投稿された時点で、その人の「入力中」は消す
         const author = list[list.length - 1]?.userId
-        if (author !== undefined) {
-          clearTimeout(typingTimers.current.get(author))
-          typingTimers.current.delete(author)
-          setTypingIds((cur) => cur.filter((x) => x !== author))
-        }
+        if (author !== undefined) clearTyping(author)
       }
       if (last > lastRead.current) {
         lastRead.current = last
@@ -145,7 +142,7 @@ export function Chat({ user, onUserChange, onLogout }: Props) {
     } catch (e) {
       if ((e as { status?: number }).status === 403) setForbidden(true)
     }
-  }, [channelId, canRead])
+  }, [channelId, canRead, clearTyping])
   useEffect(() => {
     // 非同期のデータ取得。setStateは await の後で呼ばれる
     // oxlint-disable-next-line react/set-state-in-effect
@@ -172,93 +169,8 @@ export function Chat({ user, onUserChange, onLogout }: Props) {
     if (threadId) void loadThread()
   }, [threadId, loadThread])
 
-  // リアルタイム更新(STOMP)。イベントは再取得の合図で、データは従来のRESTで取り直す
-  useEffect(() => {
-    startRealtime()
-    return stopRealtime
-  }, [])
-
-  const live = useRef({ threadId, loadThread })
-  useEffect(() => {
-    live.current = { threadId, loadThread }
-  })
-
-  useEffect(() => {
-    if (!wsId) return
-    return subscribe('/user/queue/overview', (b) => {
-      if (b.workspaceId !== wsId) return
-      void loadOverview()
-      // 投稿者名・アバターはメッセージ本体に含まれるため、プロフィール変更時は一覧も取り直す
-      if (b.type === 'profile') {
-        void loadMessages()
-        void live.current.loadThread()
-      }
-    })
-  }, [wsId, loadOverview, loadMessages])
-
-  // オンライン状態の変化(同じワークスペースのメンバーのみ届く)
-  useEffect(
-    () =>
-      subscribe('/user/queue/presence', (b) => {
-        setOnlineIds((cur) => {
-          const next = new Set(cur)
-          if (b.online) next.add(b.userId)
-          else next.delete(b.userId)
-          return next
-        })
-      }),
-    [],
-  )
-
-  // 入力中の通知。最後の通知から一定時間で消す(自分の分は表示しない)
-  useEffect(() => {
-    if (!channelId || !canRead) return
-    const timers = typingTimers.current
-    const stop = subscribe(`/topic/channels/${channelId}/typing`, (ev) => {
-      const uid = ev.userId as number
-      if (uid === user.id) return
-      clearTimeout(timers.get(uid))
-      timers.set(
-        uid,
-        setTimeout(() => {
-          timers.delete(uid)
-          setTypingIds((cur) => cur.filter((x) => x !== uid))
-        }, TYPING_SHOW_MS),
-      )
-      setTypingIds((cur) => (cur.includes(uid) ? cur : [...cur, uid]))
-    })
-    return () => {
-      stop()
-      timers.forEach(clearTimeout)
-      timers.clear()
-      setTypingIds([])
-    }
-  }, [channelId, canRead, user.id])
-
-  useEffect(() => {
-    if (!channelId || !canRead) return
-    return subscribe(`/topic/channels/${channelId}`, (ev) => {
-      if (ev.type === 'channelDeleted') {
-        setChannelId(null)
-        void loadOverview()
-        return
-      }
-      void loadMessages()
-      const { threadId: t, loadThread: lt } = live.current
-      if (t && (ev.parentId === t || ev.messageId === t)) void lt()
-    })
-  }, [channelId, canRead, loadMessages, loadOverview])
-
-  // 切断中に取りこぼした更新を再接続時にまとめて回収する
-  useEffect(
-    () =>
-      onReconnect(() => {
-        void loadOverview()
-        void loadMessages()
-        void live.current.loadThread()
-      }),
-    [loadOverview, loadMessages],
-  )
+  const clearSelectedChannel = useCallback(() => setChannelId(null), [])
+  useChatRealtime({ wsId, channelId, canRead, threadId, loadOverview, loadMessages, loadThread, onChannelDeleted: clearSelectedChannel })
 
   useEffect(() => {
     if (stickBottom.current) listEnd.current?.scrollIntoView({ block: 'end' })
@@ -333,86 +245,21 @@ export function Chat({ user, onUserChange, onLogout }: Props) {
   return (
     <div className="app">
       {navOpen && <div className="nav-backdrop" onClick={() => setNavOpen(false)} />}
-      <aside className={`sidebar${navOpen ? ' open' : ''}`}>
-        <div className="side-head">
-          <select
-            aria-label="ワークスペース"
-            value={wsId ?? ''}
-            onChange={(e) => (e.target.value === 'new' ? setModal('newWs') : setWsId(Number(e.target.value)))}
-          >
-            {workspaces.map((w) => (
-              <option key={w.id} value={w.id}>
-                {w.name}
-              </option>
-            ))}
-            <option value="new">＋ 新しいワークスペース</option>
-          </select>
-        </div>
-
-        {overview && (
-          <div className="side-scroll">
-            <div className="side-section">
-              <span>チャンネル</span>
-              <button className="icon-btn" aria-label="チャンネルを作成" title="チャンネルを作成" onClick={() => setModal('newCh')}>
-                ＋
-              </button>
-            </div>
-            {overview.channels.map((c) => (
-              <button
-                key={c.id}
-                className={`side-item${c.id === channelId && !results ? ' active' : ''}${c.unread > 0 ? ' unread' : ''}${c.joined ? '' : ' dim'}`}
-                onClick={() => selectChannel(c.id)}
-              >
-                <span>
-                  {c.isPrivate ? '🔒' : '#'} {c.name}
-                </span>
-                {c.mentions > 0 ? (
-                  <span className="badge badge-mention">@{c.mentions}</span>
-                ) : (
-                  c.unread > 0 && <span className="badge">{c.unread}</span>
-                )}
-              </button>
-            ))}
-
-            <div className="side-section">
-              <span>ダイレクトメッセージ</span>
-              <button className="icon-btn" aria-label="メンバー一覧" title="メンバー一覧" onClick={() => setModal('members')}>
-                ＋
-              </button>
-            </div>
-            {overview.dms.map((d) => {
-              const u = members.find((m) => m.id === d.userId)
-              return (
-                <button
-                  key={d.id}
-                  className={`side-item${d.id === channelId && !results ? ' active' : ''}${d.unread > 0 ? ' unread' : ''}`}
-                  onClick={() => selectChannel(d.id)}
-                >
-                  <span>
-                    <Avatar name={u?.displayName ?? '?'} url={u?.avatarUrl ?? null} size={18} online={onlineIds.has(d.userId)} /> {u?.displayName ?? '(退会済み)'}
-                  </span>
-                  {d.mentions > 0 ? (
-                    <span className="badge badge-mention">@{d.mentions}</span>
-                  ) : (
-                    d.unread > 0 && <span className="badge">{d.unread}</span>
-                  )}
-                </button>
-              )
-            })}
-          </div>
-        )}
-
-        <div className="side-foot">
-          <button className="me" onClick={() => setModal('profile')} title="プロフィール設定">
-            <Avatar name={user.displayName} url={user.avatarUrl} size={32} />
-            <span className="me-text">
-              <strong>{user.displayName}</strong>
-              <span className="muted small">{user.status || '@' + user.username}</span>
-            </span>
-          </button>
-          <button onClick={onLogout}>ログアウト</button>
-        </div>
-      </aside>
+      <Sidebar
+        user={user}
+        workspaces={workspaces}
+        wsId={wsId}
+        overview={overview}
+        channelId={channelId}
+        searching={!!results}
+        members={members}
+        onlineIds={onlineIds}
+        open={navOpen}
+        onSelectWorkspace={setWsId}
+        onSelectChannel={selectChannel}
+        onOpenModal={setModal}
+        onLogout={onLogout}
+      />
 
       <main className="main">
         {!wsId || !overview ? (
@@ -431,70 +278,34 @@ export function Chat({ user, onUserChange, onLogout }: Props) {
           </div>
         ) : (
           <>
-            <header className="topbar">
-              <button className="icon-btn menu-btn" aria-label="メニューを開く" onClick={() => setNavOpen(true)}>
-                ☰
-                {totalUnread > 0 && <span className="menu-dot" />}
-              </button>
-              <div className="title">
-                {dm ? (
-                  <strong>{dmUser?.displayName ?? 'DM'}</strong>
-                ) : channel ? (
-                  <strong>
-                    {channel.isPrivate ? '🔒' : '#'} {channel.name}
-                  </strong>
-                ) : (
-                  <strong>{overview.workspace.name}</strong>
-                )}
-                {isOwner && <span className="owner-tag">オーナー</span>}
-              </div>
-              <form className="search" onSubmit={doSearch} role="search">
-                <input
-                  value={searchText}
-                  onChange={(e) => setSearchText(e.target.value)}
-                  placeholder="メッセージを検索"
-                  aria-label="メッセージを検索"
-                />
-              </form>
-              <div className="top-actions">
-                {channel && channel.joined === 1 && (
-                  <button onClick={() => setModal('channelMembers')}>メンバー</button>
-                )}
-                <button onClick={() => setModal('members')}>ワークスペース</button>
-                {isOwner && channel && channel.name !== 'general' && (
-                  <button className="danger" onClick={() => void deleteChannel()}>
-                    チャンネル削除
-                  </button>
-                )}
-              </div>
-            </header>
+            <TopBar
+              overview={overview}
+              channel={channel}
+              dm={dm}
+              dmUser={dmUser}
+              isOwner={isOwner}
+              totalUnread={totalUnread}
+              searchText={searchText}
+              onSearchText={setSearchText}
+              onSearch={doSearch}
+              onOpenMenu={() => setNavOpen(true)}
+              onOpenModal={setModal}
+              onDeleteChannel={deleteChannel}
+            />
 
             <div className="content">
               <section className="pane">
                 {results ? (
-                  <div className="messages">
-                    <div className="row between">
-                      <h3>「{searchText}」の検索結果 ({results.length}件)</h3>
-                      <button onClick={() => setResults(null)}>閉じる</button>
-                    </div>
-                    {results.length === 0 && <p className="muted">該当するメッセージはありません</p>}
-                    {results.map((r) => (
-                      <button
-                        key={r.id}
-                        className="result"
-                        onClick={() => {
-                          setResults(null)
-                          selectChannel(r.channelId)
-                          setThreadId(r.parentId ?? null)
-                        }}
-                      >
-                        <div className="muted small">
-                          {r.isDm ? 'DM' : `# ${r.channelName}`} ・ {r.displayName} ・ {formatTime(r.createdAt)}
-                        </div>
-                        <div>{r.content}</div>
-                      </button>
-                    ))}
-                  </div>
+                  <SearchResults
+                    results={results}
+                    searchText={searchText}
+                    onClose={() => setResults(null)}
+                    onPick={(r) => {
+                      setResults(null)
+                      selectChannel(r.channelId)
+                      setThreadId(r.parentId ?? null)
+                    }}
+                  />
                 ) : !channelId ? (
                   <div className="empty muted">チャンネルを選択してください</div>
                 ) : !canRead || forbidden ? (
@@ -506,74 +317,40 @@ export function Chat({ user, onUserChange, onLogout }: Props) {
                     </button>
                   </div>
                 ) : (
-                  <>
-                    <div
-                      className="messages"
-                      onScroll={(e) => {
-                        const el = e.currentTarget
-                        stickBottom.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80
-                      }}
-                    >
-                      {messages.length === 0 && <p className="muted">まだメッセージはありません。最初の投稿をしてみましょう。</p>}
-                      {messages.map((m) => (
-                        <MessageItem
-                          key={m.id}
-                          msg={m}
-                          me={user}
-                          members={members}
-                          onlineIds={onlineIds}
-                          onChanged={refresh}
-                          onOpenThread={setThreadId}
-                          onError={showToast}
-                        />
-                      ))}
-                      <div ref={listEnd} />
-                    </div>
-                    <div className="typing" aria-live="polite">
-                      {typingText}
-                    </div>
-                    <Composer
-                      key={channelId}
-                      placeholder={dm ? `${dmUser?.displayName ?? ''}へのメッセージ` : `#${channel?.name ?? ''} へのメッセージ`}
-                      members={members}
-                      onSend={(d) => post(d)}
-                      onTyping={notifyTyping}
-                    />
-                  </>
+                  <MessagePane
+                    messages={messages}
+                    user={user}
+                    members={members}
+                    onlineIds={onlineIds}
+                    listEnd={listEnd}
+                    onNearBottomChange={(near) => {
+                      stickBottom.current = near
+                    }}
+                    typingText={typingText}
+                    composerKey={channelId}
+                    placeholder={dm ? `${dmUser?.displayName ?? ''}へのメッセージ` : `#${channel?.name ?? ''} へのメッセージ`}
+                    onChanged={refresh}
+                    onOpenThread={setThreadId}
+                    onError={showToast}
+                    onSend={(d) => post(d)}
+                    onTyping={notifyTyping}
+                  />
                 )}
               </section>
 
               {threadId && !results && (
-                <aside className="thread">
-                  <div className="row between">
-                    <h3>スレッド</h3>
-                    <button className="icon-btn" aria-label="スレッドを閉じる" onClick={() => setThreadId(null)}>
-                      ✕
-                    </button>
-                  </div>
-                  {thread ? (
-                    <>
-                      <div className="messages">
-                        <MessageItem msg={thread.parent} me={user} members={members} onlineIds={onlineIds} inThread onChanged={refresh} onError={showToast} />
-                        <div className="divider muted small">{thread.replies.length}件の返信</div>
-                        {thread.replies.map((m) => (
-                          <MessageItem key={m.id} msg={m} me={user} members={members} onlineIds={onlineIds} inThread onChanged={refresh} onError={showToast} />
-                        ))}
-                      </div>
-                      {!thread.parent.deleted && (
-                        <Composer
-                          key={`t${threadId}`}
-                          placeholder="返信する"
-                          members={members}
-                          onSend={(d) => post(d, thread.parent.id)}
-                          onTyping={notifyTyping}
-                        />
-                      )}
-                    </>
-                  ) : (
-                    <p className="muted">読み込み中...</p>
-                  )}
-                </aside>
+                <ThreadPane
+                  thread={thread}
+                  threadId={threadId}
+                  user={user}
+                  members={members}
+                  onlineIds={onlineIds}
+                  onClose={() => setThreadId(null)}
+                  onChanged={refresh}
+                  onError={showToast}
+                  onSend={post}
+                  onTyping={notifyTyping}
+                />
               )}
             </div>
           </>
@@ -642,42 +419,18 @@ export function Chat({ user, onUserChange, onLogout }: Props) {
         <ProfileModal user={user} onClose={() => setModal(null)} onSaved={onUserChange} />
       )}
       {modal === 'members' && overview && (
-        <Modal title={`${overview.workspace.name} のメンバー`} onClose={() => setModal(null)}>
-          <ul className="member-list">
-            {overview.members.map((m) => (
-              <li key={m.id}>
-                <Avatar name={m.displayName} url={m.avatarUrl} size={32} online={onlineIds.has(m.id)} />
-                <span className="grow">
-                  <strong>{m.displayName}</strong> <span className="muted small">@{m.username}</span>
-                  {m.id === overview.workspace.ownerId && <span className="owner-tag">オーナー</span>}
-                  {m.status && <div className="muted small">{m.status}</div>}
-                </span>
-                {m.id !== user.id && <button onClick={() => void openDm(m.id)}>DM</button>}
-                {isOwner && m.id !== user.id && (
-                  <button
-                    className="danger"
-                    onClick={async () => {
-                      if (!confirm(`${m.displayName} をワークスペースから退出させますか?`)) return
-                      try {
-                        await api.del(`/workspaces/${wsId}/members/${m.id}`)
-                        await loadOverview()
-                      } catch (e) {
-                        showToast((e as Error).message)
-                      }
-                    }}
-                  >
-                    キック
-                  </button>
-                )}
-              </li>
-            ))}
-          </ul>
-          {isOwner && (
-            <button className="primary" onClick={() => setModal('inviteWs')}>
-              ユーザーを招待
-            </button>
-          )}
-        </Modal>
+        <MembersModal
+          overview={overview}
+          wsId={wsId}
+          user={user}
+          isOwner={isOwner}
+          onlineIds={onlineIds}
+          onOpenDm={openDm}
+          onChanged={loadOverview}
+          onError={showToast}
+          onInvite={() => setModal('inviteWs')}
+          onClose={() => setModal(null)}
+        />
       )}
       {modal === 'channelMembers' && channel && (
         <ChannelMembersModal
@@ -688,123 +441,5 @@ export function Chat({ user, onUserChange, onLogout }: Props) {
         />
       )}
     </div>
-  )
-}
-
-function TextModal(props: {
-  title: string
-  label: string
-  submitLabel: string
-  checkbox?: string
-  onClose: () => void
-  onSubmit: (value: string, checked: boolean) => Promise<void>
-}) {
-  const [value, setValue] = useState('')
-  const [checked, setChecked] = useState(false)
-  const [error, setError] = useState('')
-  const [busy, setBusy] = useState(false)
-  const submit = async (e: FormEvent) => {
-    e.preventDefault()
-    setBusy(true)
-    setError('')
-    try {
-      await props.onSubmit(value.trim(), checked)
-      props.onClose()
-    } catch (err) {
-      setError((err as Error).message)
-    } finally {
-      setBusy(false)
-    }
-  }
-  return (
-    <Modal title={props.title} onClose={props.onClose}>
-      <form onSubmit={submit} className="form">
-        <label>
-          {props.label}
-          <input value={value} onChange={(e) => setValue(e.target.value)} autoFocus maxLength={30} required />
-        </label>
-        {props.checkbox && (
-          <label className="check">
-            <input type="checkbox" checked={checked} onChange={(e) => setChecked(e.target.checked)} /> {props.checkbox}
-          </label>
-        )}
-        {error && <p className="error" role="alert">{error}</p>}
-        <button className="primary" disabled={busy || !value.trim()}>
-          {props.submitLabel}
-        </button>
-      </form>
-    </Modal>
-  )
-}
-
-function ProfileModal({ user, onClose, onSaved }: { user: User; onClose: () => void; onSaved: (u: User) => void }) {
-  const [displayName, setDisplayName] = useState(user.displayName)
-  const [status, setStatus] = useState(user.status)
-  const [error, setError] = useState('')
-  const fileRef = useRef<HTMLInputElement>(null)
-
-  const save = async (e: FormEvent) => {
-    e.preventDefault()
-    try {
-      onSaved(await api.put<User>('/me', { displayName, status }))
-      onClose()
-    } catch (err) {
-      setError((err as Error).message)
-    }
-  }
-  const avatar = async (f?: File) => {
-    if (!f) return
-    try {
-      onSaved(await uploadAvatar(f))
-    } catch (err) {
-      setError((err as Error).message)
-    }
-  }
-  return (
-    <Modal title="プロフィール設定" onClose={onClose}>
-      <form onSubmit={save} className="form">
-        <div className="row">
-          <Avatar name={user.displayName} url={user.avatarUrl} size={64} />
-          <button type="button" onClick={() => fileRef.current?.click()}>
-            アバター画像を変更
-          </button>
-          <input ref={fileRef} type="file" accept="image/*" hidden onChange={(e) => void avatar(e.target.files?.[0])} />
-        </div>
-        <label>
-          表示名
-          <input value={displayName} onChange={(e) => setDisplayName(e.target.value)} maxLength={30} required />
-        </label>
-        <label>
-          ステータス
-          <input value={status} onChange={(e) => setStatus(e.target.value)} maxLength={100} placeholder="例: 会議中 / 休暇中" />
-        </label>
-        {error && <p className="error" role="alert">{error}</p>}
-        <button className="primary">保存</button>
-      </form>
-    </Modal>
-  )
-}
-
-function ChannelMembersModal(props: { channelId: number; title: string; onInvite: () => void; onClose: () => void }) {
-  const [list, setList] = useState<User[]>([])
-  useEffect(() => {
-    void api.get<User[]>(`/channels/${props.channelId}/members`).then(setList)
-  }, [props.channelId])
-  return (
-    <Modal title={props.title} onClose={props.onClose}>
-      <ul className="member-list">
-        {list.map((m) => (
-          <li key={m.id}>
-            <Avatar name={m.displayName} url={m.avatarUrl} size={32} />
-            <span className="grow">
-              <strong>{m.displayName}</strong> <span className="muted small">@{m.username}</span>
-            </span>
-          </li>
-        ))}
-      </ul>
-      <button className="primary" onClick={props.onInvite}>
-        メンバーを招待
-      </button>
-    </Modal>
   )
 }
