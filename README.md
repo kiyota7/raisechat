@@ -26,6 +26,17 @@ cd frontend && npm install && npm run dev
 http://localhost:5173 を開き、新規登録(ユーザーID+パスワードのみ)から始めます。
 テストは `cd backend && mvn test`。
 
+### CI
+
+GitHub Actions(`.github/workflows/ci.yml`)が、PRと `main` へのpushのたびに、次を自動実行する。
+
+| ジョブ | 内容 |
+|---|---|
+| Backend | `cd backend && mvn test`(Java 21) |
+| Frontend | `cd frontend && npm ci && npm run lint && npm run build`(Node 24) |
+
+手元で同じ確認をするには、上のコマンドをそのまま実行する。リントの警告(warning)では失敗しない。
+
 ## 実装済み機能
 
 - **認証・ユーザー**: 新規登録 / ログイン / ログアウト / プロフィール(アバター画像・表示名・ステータス)
