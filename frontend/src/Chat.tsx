@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react'
 import { api, type ThreadData } from './api'
-import { onReconnect, send, startRealtime, stopRealtime, subscribe } from './realtime'
+import { send } from './realtime'
 import type { Draft } from './Composer'
 import { ChannelMembersModal, MembersModal, ProfileModal, TextModal } from './chat/modals'
 import { MessagePane } from './chat/MessagePane'
@@ -9,10 +9,10 @@ import { Sidebar } from './chat/Sidebar'
 import { ThreadPane } from './chat/ThreadPane'
 import { TopBar } from './chat/TopBar'
 import type { ModalType } from './chat/types'
+import { useChatRealtime } from './chat/useChatRealtime'
+import { useOnlineUsers } from './chat/useOnlineUsers'
+import { useTyping } from './chat/useTyping'
 import type { Message, Overview, SearchResult, User, Workspace } from './types'
-
-/** 最後の入力中通知からこの時間だけ「入力中」を表示する */
-const TYPING_SHOW_MS = 3500
 
 interface Props {
   user: User
@@ -36,9 +36,7 @@ export function Chat({ user, onUserChange, onLogout }: Props) {
   const [results, setResults] = useState<SearchResult[] | null>(null)
   const [toast, setToast] = useState('')
   const [navOpen, setNavOpen] = useState(false)
-  const [onlineIds, setOnlineIds] = useState<Set<number>>(new Set())
-  const [typingIds, setTypingIds] = useState<number[]>([])
-  const typingTimers = useRef(new Map<number, ReturnType<typeof setTimeout>>())
+  const { onlineIds, replaceOnline } = useOnlineUsers()
   const lastSeenMsg = useRef(0)
   const lastRead = useRef(0)
   const prevMentions = useRef(0)
@@ -82,7 +80,7 @@ export function Chat({ user, onUserChange, onLogout }: Props) {
     try {
       const ov = await api.get<Overview>(`/workspaces/${wsId}`)
       setOverview(ov)
-      setOnlineIds(new Set(ov.onlineUserIds))
+      replaceOnline(ov.onlineUserIds)
       const mentions = [...ov.channels, ...ov.dms].reduce((s, c) => s + c.mentions, 0)
       if (mentions > prevMentions.current) showToast('メンションされました')
       prevMentions.current = mentions
@@ -90,7 +88,7 @@ export function Chat({ user, onUserChange, onLogout }: Props) {
       // キックされた場合などはワークスペース一覧を取り直す
       if ((e as { status?: number }).status === 403) void loadWorkspaces()
     }
-  }, [wsId, loadWorkspaces, showToast])
+  }, [wsId, loadWorkspaces, showToast, replaceOnline])
   useEffect(() => {
     // 非同期のデータ取得。setStateは await の後で呼ばれる
     // oxlint-disable-next-line react/set-state-in-effect
@@ -108,6 +106,8 @@ export function Chat({ user, onUserChange, onLogout }: Props) {
   const dmUser = dm ? overview?.members.find((m) => m.id === dm.userId) : undefined
   const isOwner = overview?.workspace.ownerId === user.id
   const canRead = !!channelId && (!!dm || channel?.joined === 1)
+
+  const { typingIds, clearTyping } = useTyping(channelId, canRead, user.id)
 
   // チャンネルを切り替えたら、前のチャンネルのメッセージとスレッドを捨てる(描画中の状態調整)
   const [shownChannelId, setShownChannelId] = useState(channelId)
@@ -133,11 +133,7 @@ export function Chat({ user, onUserChange, onLogout }: Props) {
         lastSeenMsg.current = last
         // 投稿された時点で、その人の「入力中」は消す
         const author = list[list.length - 1]?.userId
-        if (author !== undefined) {
-          clearTimeout(typingTimers.current.get(author))
-          typingTimers.current.delete(author)
-          setTypingIds((cur) => cur.filter((x) => x !== author))
-        }
+        if (author !== undefined) clearTyping(author)
       }
       if (last > lastRead.current) {
         lastRead.current = last
@@ -146,7 +142,7 @@ export function Chat({ user, onUserChange, onLogout }: Props) {
     } catch (e) {
       if ((e as { status?: number }).status === 403) setForbidden(true)
     }
-  }, [channelId, canRead])
+  }, [channelId, canRead, clearTyping])
   useEffect(() => {
     // 非同期のデータ取得。setStateは await の後で呼ばれる
     // oxlint-disable-next-line react/set-state-in-effect
@@ -173,93 +169,8 @@ export function Chat({ user, onUserChange, onLogout }: Props) {
     if (threadId) void loadThread()
   }, [threadId, loadThread])
 
-  // リアルタイム更新(STOMP)。イベントは再取得の合図で、データは従来のRESTで取り直す
-  useEffect(() => {
-    startRealtime()
-    return stopRealtime
-  }, [])
-
-  const live = useRef({ threadId, loadThread })
-  useEffect(() => {
-    live.current = { threadId, loadThread }
-  })
-
-  useEffect(() => {
-    if (!wsId) return
-    return subscribe('/user/queue/overview', (b) => {
-      if (b.workspaceId !== wsId) return
-      void loadOverview()
-      // 投稿者名・アバターはメッセージ本体に含まれるため、プロフィール変更時は一覧も取り直す
-      if (b.type === 'profile') {
-        void loadMessages()
-        void live.current.loadThread()
-      }
-    })
-  }, [wsId, loadOverview, loadMessages])
-
-  // オンライン状態の変化(同じワークスペースのメンバーのみ届く)
-  useEffect(
-    () =>
-      subscribe('/user/queue/presence', (b) => {
-        setOnlineIds((cur) => {
-          const next = new Set(cur)
-          if (b.online) next.add(b.userId)
-          else next.delete(b.userId)
-          return next
-        })
-      }),
-    [],
-  )
-
-  // 入力中の通知。最後の通知から一定時間で消す(自分の分は表示しない)
-  useEffect(() => {
-    if (!channelId || !canRead) return
-    const timers = typingTimers.current
-    const stop = subscribe(`/topic/channels/${channelId}/typing`, (ev) => {
-      const uid = ev.userId as number
-      if (uid === user.id) return
-      clearTimeout(timers.get(uid))
-      timers.set(
-        uid,
-        setTimeout(() => {
-          timers.delete(uid)
-          setTypingIds((cur) => cur.filter((x) => x !== uid))
-        }, TYPING_SHOW_MS),
-      )
-      setTypingIds((cur) => (cur.includes(uid) ? cur : [...cur, uid]))
-    })
-    return () => {
-      stop()
-      timers.forEach(clearTimeout)
-      timers.clear()
-      setTypingIds([])
-    }
-  }, [channelId, canRead, user.id])
-
-  useEffect(() => {
-    if (!channelId || !canRead) return
-    return subscribe(`/topic/channels/${channelId}`, (ev) => {
-      if (ev.type === 'channelDeleted') {
-        setChannelId(null)
-        void loadOverview()
-        return
-      }
-      void loadMessages()
-      const { threadId: t, loadThread: lt } = live.current
-      if (t && (ev.parentId === t || ev.messageId === t)) void lt()
-    })
-  }, [channelId, canRead, loadMessages, loadOverview])
-
-  // 切断中に取りこぼした更新を再接続時にまとめて回収する
-  useEffect(
-    () =>
-      onReconnect(() => {
-        void loadOverview()
-        void loadMessages()
-        void live.current.loadThread()
-      }),
-    [loadOverview, loadMessages],
-  )
+  const clearSelectedChannel = useCallback(() => setChannelId(null), [])
+  useChatRealtime({ wsId, channelId, canRead, threadId, loadOverview, loadMessages, loadThread, onChannelDeleted: clearSelectedChannel })
 
   useEffect(() => {
     if (stickBottom.current) listEnd.current?.scrollIntoView({ block: 'end' })
