@@ -3,7 +3,10 @@ package com.raisechat;
 import static org.junit.jupiter.api.Assertions.*;
 
 import com.fasterxml.jackson.databind.JsonNode;
+import java.util.List;
 import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.jdbc.core.JdbcTemplate;
 
 /** メッセージAPI(投稿・一覧・スレッド・編集・削除・リアクション・メンション)の挙動 */
 class MessageApiTest extends ApiTestBase {
@@ -162,6 +165,9 @@ class MessageApiTest extends ApiTestBase {
 		assertEquals(404, status("POST", "/messages/999999/reactions", owner.token(), "{\"emoji\":\"👍\"}"));
 	}
 
+	@Autowired
+	JdbcTemplate jdbc;
+
 	@Test
 	void mentionsCountOncePerMessageAndOnlyForWorkspaceMembers() throws Exception {
 		TestUser owner = register("own"), guest = register("gst"), outsider = register("out");
@@ -169,8 +175,11 @@ class MessageApiTest extends ApiTestBase {
 		invite(ws, owner, guest);
 		long general = channelId(overview(ws, owner), "general");
 
-		post(general, owner, "@" + guest.name() + " @" + guest.name() + " @" + outsider.name() + " @nobody_here");
+		long m = post(general, owner, "@" + guest.name() + " @" + guest.name() + " @" + outsider.name() + " @nobody_here");
 		assertEquals(1, channel(overview(ws, guest), "general").get("mentions").asInt()); // 同じ人への重複は1回
-		assertEquals(0, ok("GET", "/workspaces", outsider.token(), null).size()); // ワークスペース外の人には何も起きない
+
+		// ワークスペース外の人や、存在しないIDには保存しない(外部の人は画面からは確認できないので、保存先を直接見る)
+		List<Long> mentioned = jdbc.queryForList("SELECT user_id FROM mentions WHERE message_id = ?", Long.class, m);
+		assertEquals(List.of(guest.id()), mentioned);
 	}
 }
