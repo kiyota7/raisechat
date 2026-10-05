@@ -37,7 +37,7 @@ GitHub Actions(`.github/workflows/ci.yml`)が、PRと `main` へのpushのたび
 | Backend | `cd backend && mvn test`(Java 21) |
 | Frontend | `cd frontend && npm ci && npm run lint && npm run build`(Node 24) |
 
-手元で同じ確認をするには、上のコマンドをそのまま実行する。リントの警告(warning)では失敗しない。
+手元で同じ確認をするには、上のコマンドをそのまま実行する。リントは `--deny-warnings` のため、**警告(warning)があっても失敗する**。やむを得ず抑制する場合は、`oxlint-disable-next-line` に理由のコメントを添える。
 
 ## 実装済み機能
 
