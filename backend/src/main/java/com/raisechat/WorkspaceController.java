@@ -3,14 +3,10 @@ package com.raisechat;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Size;
-import java.sql.PreparedStatement;
-import java.sql.Statement;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import org.springframework.http.HttpStatus;
 import org.springframework.jdbc.core.JdbcTemplate;
-import org.springframework.jdbc.support.GeneratedKeyHolder;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.*;
 
@@ -20,13 +16,18 @@ public class WorkspaceController {
 	private final JdbcTemplate jdbc;
 	private final Access access;
 	private final Realtime realtime;
-	private final PresenceService presence;
+	private final Sql sql;
+	private final WorkspaceOverview workspaceOverview;
+	private final MessageQueries queries;
 
-	public WorkspaceController(JdbcTemplate jdbc, Access access, Realtime realtime, PresenceService presence) {
+	public WorkspaceController(JdbcTemplate jdbc, Access access, Realtime realtime, Sql sql, WorkspaceOverview workspaceOverview,
+			MessageQueries queries) {
 		this.jdbc = jdbc;
 		this.access = access;
 		this.realtime = realtime;
-		this.presence = presence;
+		this.sql = sql;
+		this.workspaceOverview = workspaceOverview;
+		this.queries = queries;
 	}
 
 	public record NameRequest(@NotBlank(message = "名前を入力してください") @Size(max = 30, message = "名前は30文字以内で入力してください") String name) {
@@ -48,9 +49,9 @@ public class WorkspaceController {
 	@PostMapping("/workspaces")
 	@Transactional
 	public Map<String, Object> create(@RequestAttribute("userId") long uid, @Valid @RequestBody NameRequest req) {
-		long wsId = insert("INSERT INTO workspaces (name, owner_id) VALUES (?, ?)", req.name().trim(), uid);
+		long wsId = sql.insert("INSERT INTO workspaces (name, owner_id) VALUES (?, ?)", req.name().trim(), uid);
 		jdbc.update("INSERT INTO workspace_members (workspace_id, user_id) VALUES (?, ?)", wsId, uid);
-		long chId = insert("INSERT INTO channels (workspace_id, name, is_private, is_dm) VALUES (?, 'general', 0, 0)", wsId);
+		long chId = sql.insert("INSERT INTO channels (workspace_id, name, is_private, is_dm) VALUES (?, 'general', 0, 0)", wsId);
 		jdbc.update("INSERT INTO channel_members (channel_id, user_id) VALUES (?, ?)", chId, uid);
 		return access.workspace(wsId);
 	}
@@ -59,28 +60,7 @@ public class WorkspaceController {
 	@GetMapping("/workspaces/{id}")
 	public Map<String, Object> overview(@RequestAttribute("userId") long uid, @PathVariable long id) {
 		access.requireWorkspaceMember(id, uid);
-		Map<String, Object> res = new LinkedHashMap<>();
-		res.put("workspace", access.workspace(id));
-		res.put("members", jdbc.queryForList(
-				"SELECT u.id, u.username, u.display_name AS displayName, u.status, u.avatar_url AS avatarUrl "
-						+ "FROM users u JOIN workspace_members m ON m.user_id = u.id WHERE m.workspace_id = ? ORDER BY u.id", id));
-		res.put("onlineUserIds", presence.onlineAmong(realtime.workspaceMembers(id)));
-		String counts = "(SELECT COUNT(*) FROM messages x WHERE x.channel_id = c.id AND x.deleted = 0 AND x.user_id <> ? "
-				+ "AND x.id > IFNULL(cm.last_read_message_id, 0)) AS unread, "
-				+ "(SELECT COUNT(*) FROM messages x JOIN mentions mt ON mt.message_id = x.id AND mt.user_id = ? "
-				+ "WHERE x.channel_id = c.id AND x.deleted = 0 AND x.user_id <> ? AND x.id > IFNULL(cm.last_read_message_id, 0)) AS mentions";
-		res.put("channels", jdbc.queryForList(
-				"SELECT c.id, c.name, c.is_private AS isPrivate, cm.user_id IS NOT NULL AS joined, " + counts
-						+ " FROM channels c LEFT JOIN channel_members cm ON cm.channel_id = c.id AND cm.user_id = ? "
-						+ "WHERE c.workspace_id = ? AND c.is_dm = 0 AND (c.is_private = 0 OR cm.user_id IS NOT NULL) ORDER BY c.name",
-				uid, uid, uid, uid, id));
-		res.put("dms", jdbc.queryForList(
-				"SELECT c.id, other.user_id AS userId, " + counts
-						+ " FROM channels c JOIN channel_members cm ON cm.channel_id = c.id AND cm.user_id = ? "
-						+ "JOIN channel_members other ON other.channel_id = c.id AND other.user_id <> ? "
-						+ "WHERE c.workspace_id = ? AND c.is_dm = 1 ORDER BY c.id",
-				uid, uid, uid, uid, uid, id));
-		return res;
+		return workspaceOverview.build(uid, id);
 	}
 
 	@PostMapping("/workspaces/{id}/invite")
@@ -132,7 +112,7 @@ public class WorkspaceController {
 		if (dup != null && dup > 0) {
 			throw new ApiException(HttpStatus.CONFLICT, "同じ名前のチャンネルが既にあります");
 		}
-		long chId = insert("INSERT INTO channels (workspace_id, name, is_private, is_dm) VALUES (?, ?, ?, 0)",
+		long chId = sql.insert("INSERT INTO channels (workspace_id, name, is_private, is_dm) VALUES (?, ?, ?, 0)",
 				id, name, req.isPrivate() ? 1 : 0);
 		jdbc.update("INSERT INTO channel_members (channel_id, user_id) VALUES (?, ?)", chId, uid);
 		if (!req.isPrivate()) {
@@ -162,7 +142,7 @@ public class WorkspaceController {
 				Long.class, id, uid, req.userId());
 		long chId;
 		if (existing.isEmpty()) {
-			chId = insert("INSERT INTO channels (workspace_id, name, is_private, is_dm) VALUES (?, ?, 1, 1)", id,
+			chId = sql.insert("INSERT INTO channels (workspace_id, name, is_private, is_dm) VALUES (?, ?, 1, 1)", id,
 					"dm-" + Math.min(uid, req.userId()) + "-" + Math.max(uid, req.userId()));
 			jdbc.update("INSERT INTO channel_members (channel_id, user_id) VALUES (?, ?), (?, ?)", chId, uid, chId, req.userId());
 			realtime.overviewToUsers(id, List.of(req.userId()));
@@ -179,26 +159,6 @@ public class WorkspaceController {
 		if (q.isBlank()) {
 			return List.of();
 		}
-		String like = "%" + q.trim().replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%";
-		return jdbc.queryForList(
-				"SELECT m.id, m.channel_id AS channelId, m.parent_id AS parentId, c.name AS channelName, c.is_dm AS isDm, "
-						+ "m.content, m.created_at AS createdAt, u.display_name AS displayName, u.avatar_url AS avatarUrl "
-						+ "FROM messages m JOIN channels c ON c.id = m.channel_id JOIN users u ON u.id = m.user_id "
-						+ "JOIN channel_members cm ON cm.channel_id = c.id AND cm.user_id = ? "
-						+ "WHERE c.workspace_id = ? AND m.deleted = 0 AND m.content LIKE ? ESCAPE '\\' "
-						+ "ORDER BY m.id DESC LIMIT 50",
-				uid, id, like);
-	}
-
-	private long insert(String sql, Object... args) {
-		GeneratedKeyHolder kh = new GeneratedKeyHolder();
-		jdbc.update(con -> {
-			PreparedStatement ps = con.prepareStatement(sql, Statement.RETURN_GENERATED_KEYS);
-			for (int i = 0; i < args.length; i++) {
-				ps.setObject(i + 1, args[i]);
-			}
-			return ps;
-		}, kh);
-		return kh.getKey().longValue();
+		return queries.search(uid, id, q);
 	}
 }
