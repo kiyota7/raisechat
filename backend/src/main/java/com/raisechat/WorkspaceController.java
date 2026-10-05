@@ -20,11 +20,13 @@ public class WorkspaceController {
 	private final JdbcTemplate jdbc;
 	private final Access access;
 	private final Realtime realtime;
+	private final PresenceService presence;
 
-	public WorkspaceController(JdbcTemplate jdbc, Access access, Realtime realtime) {
+	public WorkspaceController(JdbcTemplate jdbc, Access access, Realtime realtime, PresenceService presence) {
 		this.jdbc = jdbc;
 		this.access = access;
 		this.realtime = realtime;
+		this.presence = presence;
 	}
 
 	public record NameRequest(@NotBlank(message = "名前を入力してください") @Size(max = 30, message = "名前は30文字以内で入力してください") String name) {
@@ -62,6 +64,7 @@ public class WorkspaceController {
 		res.put("members", jdbc.queryForList(
 				"SELECT u.id, u.username, u.display_name AS displayName, u.status, u.avatar_url AS avatarUrl "
 						+ "FROM users u JOIN workspace_members m ON m.user_id = u.id WHERE m.workspace_id = ? ORDER BY u.id", id));
+		res.put("onlineUserIds", presence.onlineAmong(realtime.workspaceMembers(id)));
 		String counts = "(SELECT COUNT(*) FROM messages x WHERE x.channel_id = c.id AND x.deleted = 0 AND x.user_id <> ? "
 				+ "AND x.id > IFNULL(cm.last_read_message_id, 0)) AS unread, "
 				+ "(SELECT COUNT(*) FROM messages x JOIN mentions mt ON mt.message_id = x.id AND mt.user_id = ? "

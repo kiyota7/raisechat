@@ -1,11 +1,14 @@
 import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react'
 import { api, uploadAvatar, type ThreadData } from './api'
-import { onReconnect, startRealtime, stopRealtime, subscribe } from './realtime'
+import { onReconnect, send, startRealtime, stopRealtime, subscribe } from './realtime'
 import { Avatar } from './Avatar'
 import { Composer, type Draft } from './Composer'
 import { MessageItem, formatTime } from './MessageItem'
 import { Modal } from './Modal'
 import type { Message, Overview, SearchResult, User, Workspace } from './types'
+
+/** 最後の入力中通知からこの時間だけ「入力中」を表示する */
+const TYPING_SHOW_MS = 3500
 
 type ModalType = 'newWs' | 'newCh' | 'inviteWs' | 'inviteCh' | 'profile' | 'members' | 'channelMembers' | null
 
@@ -30,6 +33,10 @@ export function Chat({ user, onUserChange, onLogout }: Props) {
   const [results, setResults] = useState<SearchResult[] | null>(null)
   const [toast, setToast] = useState('')
   const [navOpen, setNavOpen] = useState(false)
+  const [onlineIds, setOnlineIds] = useState<Set<number>>(new Set())
+  const [typingIds, setTypingIds] = useState<number[]>([])
+  const typingTimers = useRef(new Map<number, ReturnType<typeof setTimeout>>())
+  const lastSeenMsg = useRef(0)
   const lastRead = useRef(0)
   const prevMentions = useRef(0)
   const listEnd = useRef<HTMLDivElement>(null)
@@ -65,6 +72,7 @@ export function Chat({ user, onUserChange, onLogout }: Props) {
     try {
       const ov = await api.get<Overview>(`/workspaces/${wsId}`)
       setOverview(ov)
+      setOnlineIds(new Set(ov.onlineUserIds))
       const mentions = [...ov.channels, ...ov.dms].reduce((s, c) => s + c.mentions, 0)
       if (mentions > prevMentions.current) showToast('メンションされました')
       prevMentions.current = mentions
@@ -96,6 +104,7 @@ export function Chat({ user, onUserChange, onLogout }: Props) {
     setForbidden(false)
     setThreadId(null)
     lastRead.current = 0
+    lastSeenMsg.current = 0
     stickBottom.current = true
   }, [channelId])
 
@@ -105,6 +114,16 @@ export function Chat({ user, onUserChange, onLogout }: Props) {
       const list = await api.get<Message[]>(`/channels/${channelId}/messages`)
       setMessages(list)
       const last = list.length ? list[list.length - 1].id : 0
+      if (last > lastSeenMsg.current) {
+        lastSeenMsg.current = last
+        // 投稿された時点で、その人の「入力中」は消す
+        const author = list[list.length - 1]?.userId
+        if (author !== undefined) {
+          clearTimeout(typingTimers.current.get(author))
+          typingTimers.current.delete(author)
+          setTypingIds((cur) => cur.filter((x) => x !== author))
+        }
+      }
       if (last > lastRead.current) {
         lastRead.current = last
         void api.post(`/channels/${channelId}/read`)
@@ -155,6 +174,45 @@ export function Chat({ user, onUserChange, onLogout }: Props) {
       }
     })
   }, [wsId, loadOverview, loadMessages])
+
+  // オンライン状態の変化(同じワークスペースのメンバーのみ届く)
+  useEffect(
+    () =>
+      subscribe('/user/queue/presence', (b) => {
+        setOnlineIds((cur) => {
+          const next = new Set(cur)
+          if (b.online) next.add(b.userId)
+          else next.delete(b.userId)
+          return next
+        })
+      }),
+    [],
+  )
+
+  // 入力中の通知。最後の通知から一定時間で消す(自分の分は表示しない)
+  useEffect(() => {
+    if (!channelId || !canRead) return
+    const timers = typingTimers.current
+    const stop = subscribe(`/topic/channels/${channelId}/typing`, (ev) => {
+      const uid = ev.userId as number
+      if (uid === user.id) return
+      clearTimeout(timers.get(uid))
+      timers.set(
+        uid,
+        setTimeout(() => {
+          timers.delete(uid)
+          setTypingIds((cur) => cur.filter((x) => x !== uid))
+        }, TYPING_SHOW_MS),
+      )
+      setTypingIds((cur) => (cur.includes(uid) ? cur : [...cur, uid]))
+    })
+    return () => {
+      stop()
+      timers.forEach(clearTimeout)
+      timers.clear()
+      setTypingIds([])
+    }
+  }, [channelId, canRead, user.id])
 
   useEffect(() => {
     if (!channelId || !canRead) return
@@ -244,6 +302,12 @@ export function Chat({ user, onUserChange, onLogout }: Props) {
   if (!loaded) return <div className="center-screen">読み込み中...</div>
 
   const members = overview?.members ?? []
+  const typingNames = typingIds.map((id) => members.find((m) => m.id === id)?.displayName).filter((n): n is string => !!n)
+  const typingText =
+    typingNames.length === 0 ? '' : typingNames.length <= 2 ? `${typingNames.join('、')}が入力中...` : `${typingNames.length}人が入力中...`
+  const notifyTyping = () => {
+    if (channelId) send('/app/typing', { channelId })
+  }
 
   return (
     <div className="app">
@@ -304,7 +368,7 @@ export function Chat({ user, onUserChange, onLogout }: Props) {
                   onClick={() => selectChannel(d.id)}
                 >
                   <span>
-                    <Avatar name={u?.displayName ?? '?'} url={u?.avatarUrl ?? null} size={18} /> {u?.displayName ?? '(退会済み)'}
+                    <Avatar name={u?.displayName ?? '?'} url={u?.avatarUrl ?? null} size={18} online={onlineIds.has(d.userId)} /> {u?.displayName ?? '(退会済み)'}
                   </span>
                   {d.mentions > 0 ? (
                     <span className="badge badge-mention">@{d.mentions}</span>
@@ -436,6 +500,7 @@ export function Chat({ user, onUserChange, onLogout }: Props) {
                           msg={m}
                           me={user}
                           members={members}
+                          onlineIds={onlineIds}
                           onChanged={refresh}
                           onOpenThread={setThreadId}
                           onError={showToast}
@@ -443,11 +508,15 @@ export function Chat({ user, onUserChange, onLogout }: Props) {
                       ))}
                       <div ref={listEnd} />
                     </div>
+                    <div className="typing" aria-live="polite">
+                      {typingText}
+                    </div>
                     <Composer
                       key={channelId}
                       placeholder={dm ? `${dmUser?.displayName ?? ''}へのメッセージ` : `#${channel?.name ?? ''} へのメッセージ`}
                       members={members}
                       onSend={(d) => post(d)}
+                      onTyping={notifyTyping}
                     />
                   </>
                 )}
@@ -464,10 +533,10 @@ export function Chat({ user, onUserChange, onLogout }: Props) {
                   {thread ? (
                     <>
                       <div className="messages">
-                        <MessageItem msg={thread.parent} me={user} members={members} inThread onChanged={refresh} onError={showToast} />
+                        <MessageItem msg={thread.parent} me={user} members={members} onlineIds={onlineIds} inThread onChanged={refresh} onError={showToast} />
                         <div className="divider muted small">{thread.replies.length}件の返信</div>
                         {thread.replies.map((m) => (
-                          <MessageItem key={m.id} msg={m} me={user} members={members} inThread onChanged={refresh} onError={showToast} />
+                          <MessageItem key={m.id} msg={m} me={user} members={members} onlineIds={onlineIds} inThread onChanged={refresh} onError={showToast} />
                         ))}
                       </div>
                       {!thread.parent.deleted && (
@@ -476,6 +545,7 @@ export function Chat({ user, onUserChange, onLogout }: Props) {
                           placeholder="返信する"
                           members={members}
                           onSend={(d) => post(d, thread.parent.id)}
+                          onTyping={notifyTyping}
                         />
                       )}
                     </>
@@ -555,7 +625,7 @@ export function Chat({ user, onUserChange, onLogout }: Props) {
           <ul className="member-list">
             {overview.members.map((m) => (
               <li key={m.id}>
-                <Avatar name={m.displayName} url={m.avatarUrl} size={32} />
+                <Avatar name={m.displayName} url={m.avatarUrl} size={32} online={onlineIds.has(m.id)} />
                 <span className="grow">
                   <strong>{m.displayName}</strong> <span className="muted small">@{m.username}</span>
                   {m.id === overview.workspace.ownerId && <span className="owner-tag">オーナー</span>}
