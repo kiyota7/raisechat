@@ -59,6 +59,11 @@ export function Login({ onLogin }: { onLogin: (u: User) => void }) {
             required
           />
         </label>
+        {mode === 'register' && (
+          <p className="muted small">
+            8文字以上。ユーザーIDを含むものや、よくある簡単なパスワード(12345678 など)は使えません。
+          </p>
+        )}
         {error && <p className="error" role="alert">{error}</p>}
         <button className="primary" disabled={busy}>
           {mode === 'login' ? 'ログイン' : '登録してはじめる'}

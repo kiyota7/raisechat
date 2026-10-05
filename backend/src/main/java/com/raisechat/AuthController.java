@@ -1,5 +1,6 @@
 package com.raisechat;
 
+import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Pattern;
@@ -24,13 +25,17 @@ public class AuthController {
 	private final JwtService jwt;
 	private final FileStorage storage;
 	private final Realtime realtime;
+	private final LoginAttemptLimiter limiter;
 	private final BCryptPasswordEncoder encoder = new BCryptPasswordEncoder();
+	/** 存在しないユーザーIDのときも、パスワードの照合にかかる時間を揃えるためのダミー */
+	private final String dummyHash = encoder.encode("raisechat-dummy-password");
 
-	public AuthController(JdbcTemplate jdbc, JwtService jwt, FileStorage storage, Realtime realtime) {
+	public AuthController(JdbcTemplate jdbc, JwtService jwt, FileStorage storage, Realtime realtime, LoginAttemptLimiter limiter) {
 		this.jdbc = jdbc;
 		this.jwt = jwt;
 		this.storage = storage;
 		this.realtime = realtime;
+		this.limiter = limiter;
 	}
 
 	public record RegisterRequest(
@@ -52,6 +57,9 @@ public class AuthController {
 
 	@PostMapping("/auth/register")
 	public Map<String, Object> register(@Valid @RequestBody RegisterRequest req) {
+		PasswordPolicy.check(req.username(), req.password()).ifPresent(msg -> {
+			throw new ApiException(HttpStatus.BAD_REQUEST, msg);
+		});
 		String display = req.displayName() == null || req.displayName().isBlank() ? req.username() : req.displayName().trim();
 		try {
 			jdbc.update("INSERT INTO users (username, password_hash, display_name) VALUES (?, ?, ?)",
@@ -66,12 +74,19 @@ public class AuthController {
 	}
 
 	@PostMapping("/auth/login")
-	public Map<String, Object> login(@Valid @RequestBody LoginRequest req) {
+	public Map<String, Object> login(@Valid @RequestBody LoginRequest req, HttpServletRequest http) {
+		String ip = http.getRemoteAddr();
+		limiter.check(req.username(), ip);
 		List<Map<String, Object>> rows = jdbc.queryForList(
 				"SELECT id, password_hash FROM users WHERE username = ?", req.username());
-		if (rows.isEmpty() || !encoder.matches(req.password(), (String) rows.get(0).get("password_hash"))) {
+		// 存在しないユーザーIDでも照合を行い、応答時間の差からIDの有無が分からないようにする
+		String hash = rows.isEmpty() ? dummyHash : (String) rows.get(0).get("password_hash");
+		boolean ok = encoder.matches(req.password(), hash) && !rows.isEmpty();
+		if (!ok) {
+			limiter.recordFailure(req.username(), ip);
 			throw new ApiException(HttpStatus.UNAUTHORIZED, "ユーザーIDまたはパスワードが正しくありません");
 		}
+		limiter.recordSuccess(req.username(), ip);
 		return session(((Number) rows.get(0).get("id")).longValue());
 	}
 

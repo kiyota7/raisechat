@@ -97,7 +97,7 @@ abstract class StompTestBase {
 	}
 
 	String register(String name) throws Exception {
-		return call("POST", "/auth/register", null, "{\"username\":\"" + name + "\",\"password\":\"password1\"}").get("token").asText();
+		return call("POST", "/auth/register", null, "{\"username\":\"" + name + "\",\"password\":\"Chat-Test-1x\"}").get("token").asText();
 	}
 
 	long userId(String token) throws Exception {

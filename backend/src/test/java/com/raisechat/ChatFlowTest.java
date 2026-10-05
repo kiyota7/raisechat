@@ -31,7 +31,7 @@ class ChatFlowTest {
 	}
 
 	String register(String name) throws Exception {
-		return call(post("/api/auth/register"), null, "{\"username\":\"" + name + "\",\"password\":\"password1\"}").get("token").asText();
+		return call(post("/api/auth/register"), null, "{\"username\":\"" + name + "\",\"password\":\"Chat-Test-1x\"}").get("token").asText();
 	}
 
 	@Test
