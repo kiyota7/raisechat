@@ -2,9 +2,7 @@ package com.raisechat;
 
 import java.time.Clock;
 import java.time.Duration;
-import java.util.ArrayDeque;
-import java.util.Deque;
-import java.util.HashMap;
+import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -20,6 +18,8 @@ import org.springframework.stereotype.Component;
  * </ul>
  * ユーザーIDが存在するかどうかで挙動を変えない(存在しないIDの失敗も同じように数える)。
  * 成功したら、そのユーザーID+IPの失敗回数だけをリセットする(IPごとの回数は残す)。
+ * 失敗の記録は LoginAttemptStore(1台ならメモリ、複数台ならRedis)に置く。複数台のときは、確認と記録が
+ * 別々の操作になるため、同時に大量に送られた場合は、上限を数件超えて通ることがある。
  */
 @Component
 public class LoginAttemptLimiter {
@@ -30,20 +30,26 @@ public class LoginAttemptLimiter {
 	private final int ipMaxFailures;
 	private final long windowMs;
 	private final Clock clock;
-	private final Map<String, Deque<Long>> failures = new HashMap<>();
+	private final LoginAttemptStore store;
 
 	@Autowired
 	public LoginAttemptLimiter(@Value("${app.login.max-failures:5}") int maxFailures,
 			@Value("${app.login.ip-max-failures:20}") int ipMaxFailures,
-			@Value("${app.login.window-minutes:15}") long windowMinutes) {
-		this(maxFailures, ipMaxFailures, Duration.ofMinutes(windowMinutes), Clock.systemUTC());
+			@Value("${app.login.window-minutes:15}") long windowMinutes, LoginAttemptStore store) {
+		this(maxFailures, ipMaxFailures, Duration.ofMinutes(windowMinutes), Clock.systemUTC(), store);
 	}
 
-	LoginAttemptLimiter(int maxFailures, int ipMaxFailures, Duration window, Clock clock) {
+	LoginAttemptLimiter(int maxFailures, int ipMaxFailures, Duration window, Clock clock, LoginAttemptStore store) {
 		this.maxFailures = maxFailures;
 		this.ipMaxFailures = ipMaxFailures;
 		this.windowMs = window.toMillis();
 		this.clock = clock;
+		this.store = store;
+	}
+
+	/** メモリ版の保存先で作る(テスト用) */
+	LoginAttemptLimiter(int maxFailures, int ipMaxFailures, Duration window, Clock clock) {
+		this(maxFailures, ipMaxFailures, window, clock, new InMemoryLoginAttemptStore());
 	}
 
 	/** 制限中なら 429(Retry-After つき)を投げる */
@@ -61,34 +67,23 @@ public class LoginAttemptLimiter {
 
 	public synchronized void recordFailure(String username, String ip) {
 		long now = clock.millis();
-		purgeExpired(now);
-		failures.computeIfAbsent(userKey(username, ip), k -> new ArrayDeque<>()).addLast(now);
-		failures.computeIfAbsent(ipKey(ip), k -> new ArrayDeque<>()).addLast(now);
+		store.add(userKey(username, ip), now, windowMs);
+		store.add(ipKey(ip), now, windowMs);
 	}
 
 	public synchronized void recordSuccess(String username, String ip) {
-		failures.remove(userKey(username, ip));
+		store.remove(userKey(username, ip));
 	}
 
 	/** 制限を解除できるまでの残りミリ秒。制限中でなければ0 */
 	private long waitMs(String key, int max, long now) {
-		Deque<Long> times = failures.get(key);
-		if (times == null) {
-			return 0;
-		}
-		while (!times.isEmpty() && now - times.peekFirst() >= windowMs) {
-			times.pollFirst();
-		}
+		List<Long> times = store.recent(key, now, windowMs);
 		if (times.size() < max) {
 			return 0;
 		}
 		// 古い方から (size - max + 1) 番目の失敗が期間外になれば、max未満に戻る
-		long expiring = times.stream().skip(times.size() - max).findFirst().orElseThrow();
+		long expiring = times.get(times.size() - max);
 		return expiring + windowMs - now;
-	}
-
-	private void purgeExpired(long now) {
-		failures.values().removeIf(times -> times.isEmpty() || now - times.peekLast() >= windowMs);
 	}
 
 	private static String userKey(String username, String ip) {

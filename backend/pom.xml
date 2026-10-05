@@ -42,6 +42,11 @@
 			<groupId>org.springframework.boot</groupId>
 			<artifactId>spring-boot-starter-websocket</artifactId>
 		</dependency>
+		<!-- 複数サーバー対応(app.cluster.mode=redis のときだけ使う。通知・オンライン状態・ログイン失敗回数を共有する) -->
+		<dependency>
+			<groupId>org.springframework.boot</groupId>
+			<artifactId>spring-boot-starter-data-redis</artifactId>
+		</dependency>
 		<!-- 添付ファイルの保存先(app.storage.type=s3 のときだけ使う。署名付きURLの生成も含む) -->
 		<dependency>
 			<groupId>software.amazon.awssdk</groupId>
