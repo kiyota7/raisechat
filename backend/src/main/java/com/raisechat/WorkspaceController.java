@@ -42,7 +42,7 @@ public class WorkspaceController {
 	@GetMapping("/workspaces")
 	public List<Map<String, Object>> list(@RequestAttribute("userId") long uid) {
 		return jdbc.queryForList(
-				"SELECT w.id, w.name, w.owner_id AS ownerId FROM workspaces w "
+				"SELECT w.id, w.name, w.owner_id AS \"ownerId\" FROM workspaces w "
 						+ "JOIN workspace_members m ON m.workspace_id = w.id WHERE m.user_id = ? ORDER BY w.id", uid);
 	}
 
@@ -79,9 +79,9 @@ public class WorkspaceController {
 			throw new ApiException(HttpStatus.CONFLICT, "既にメンバーです");
 		}
 		jdbc.update("INSERT INTO workspace_members (workspace_id, user_id) VALUES (?, ?)", id, target);
-		jdbc.update("INSERT OR IGNORE INTO channel_members (channel_id, user_id, last_read_message_id) "
-				+ "SELECT id, ?, IFNULL((SELECT MAX(id) FROM messages WHERE channel_id = channels.id), 0) "
-				+ "FROM channels WHERE workspace_id = ? AND name = 'general' AND is_dm = 0", target, id);
+		jdbc.update("INSERT INTO channel_members (channel_id, user_id, last_read_message_id) "
+				+ "SELECT id, CAST(? AS BIGINT), COALESCE((SELECT MAX(id) FROM messages WHERE channel_id = channels.id), 0) "
+				+ "FROM channels WHERE workspace_id = ? AND name = 'general' AND is_dm = 0 ON CONFLICT DO NOTHING", target, id);
 		realtime.overviewToWorkspace(id);
 		return Map.of("userId", target);
 	}
