@@ -73,14 +73,24 @@ public class PresenceService {
 				pending.cancel(false);
 			}
 		}
-		if (store.connect(uid, sessionId)) {
-			broadcast(uid, true);
+		try {
+			if (store.connect(uid, sessionId)) {
+				broadcast(uid, true);
+			}
+		} catch (RuntimeException e) {
+			log.warn("接続を記録できなかった(オンライン表示に反映されない): {}", e.toString());
 		}
 	}
 
 	@EventListener
 	public void onDisconnected(SessionDisconnectEvent event) {
-		Long uid = store.disconnect(event.getSessionId());
+		Long uid;
+		try {
+			uid = store.disconnect(event.getSessionId());
+		} catch (RuntimeException e) {
+			log.warn("切断を記録できなかった(期限が切れるまでオンライン表示が残る): {}", e.toString());
+			return;
+		}
 		if (uid == null) {
 			return;
 		}
@@ -94,8 +104,12 @@ public class PresenceService {
 		synchronized (this) {
 			pendingOffline.remove(uid);
 		}
-		if (store.markOfflineIfNoConnection(uid)) {
-			broadcast(uid, false);
+		try {
+			if (store.markOfflineIfNoConnection(uid)) {
+				broadcast(uid, false);
+			}
+		} catch (RuntimeException e) {
+			log.warn("オフラインへの切り替えに失敗した: {}", e.toString());
 		}
 	}
 
@@ -110,12 +124,22 @@ public class PresenceService {
 	}
 
 	public boolean isOnline(long userId) {
-		return store.isOnline(userId);
+		try {
+			return store.isOnline(userId);
+		} catch (RuntimeException e) {
+			log.warn("オンライン状態を読めなかった: {}", e.toString());
+			return false;
+		}
 	}
 
-	/** 渡されたユーザーのうち、オンラインのIDだけを返す */
+	/** 渡されたユーザーのうち、オンラインのIDだけを返す。保存先を読めないときは、全員オフラインとして続ける(概要のAPIを失敗させない) */
 	public List<Long> onlineAmong(Collection<Long> userIds) {
-		return store.onlineAmong(userIds);
+		try {
+			return store.onlineAmong(userIds);
+		} catch (RuntimeException e) {
+			log.warn("オンライン状態を読めなかった: {}", e.toString());
+			return List.of();
+		}
 	}
 
 	/** 同じワークスペースに所属するメンバーにだけ、状態の変化を伝える */
