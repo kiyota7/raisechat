@@ -1,11 +1,13 @@
 import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react'
 import { api, type ThreadData } from './api'
 import { onReconnect, send, startRealtime, stopRealtime, subscribe } from './realtime'
-import { Avatar } from './Avatar'
-import { Composer, type Draft } from './Composer'
-import { formatTime } from './format'
-import { MessageItem } from './MessageItem'
+import type { Draft } from './Composer'
 import { ChannelMembersModal, MembersModal, ProfileModal, TextModal } from './chat/modals'
+import { MessagePane } from './chat/MessagePane'
+import { SearchResults } from './chat/SearchResults'
+import { Sidebar } from './chat/Sidebar'
+import { ThreadPane } from './chat/ThreadPane'
+import { TopBar } from './chat/TopBar'
 import type { ModalType } from './chat/types'
 import type { Message, Overview, SearchResult, User, Workspace } from './types'
 
@@ -332,86 +334,21 @@ export function Chat({ user, onUserChange, onLogout }: Props) {
   return (
     <div className="app">
       {navOpen && <div className="nav-backdrop" onClick={() => setNavOpen(false)} />}
-      <aside className={`sidebar${navOpen ? ' open' : ''}`}>
-        <div className="side-head">
-          <select
-            aria-label="ワークスペース"
-            value={wsId ?? ''}
-            onChange={(e) => (e.target.value === 'new' ? setModal('newWs') : setWsId(Number(e.target.value)))}
-          >
-            {workspaces.map((w) => (
-              <option key={w.id} value={w.id}>
-                {w.name}
-              </option>
-            ))}
-            <option value="new">＋ 新しいワークスペース</option>
-          </select>
-        </div>
-
-        {overview && (
-          <div className="side-scroll">
-            <div className="side-section">
-              <span>チャンネル</span>
-              <button className="icon-btn" aria-label="チャンネルを作成" title="チャンネルを作成" onClick={() => setModal('newCh')}>
-                ＋
-              </button>
-            </div>
-            {overview.channels.map((c) => (
-              <button
-                key={c.id}
-                className={`side-item${c.id === channelId && !results ? ' active' : ''}${c.unread > 0 ? ' unread' : ''}${c.joined ? '' : ' dim'}`}
-                onClick={() => selectChannel(c.id)}
-              >
-                <span>
-                  {c.isPrivate ? '🔒' : '#'} {c.name}
-                </span>
-                {c.mentions > 0 ? (
-                  <span className="badge badge-mention">@{c.mentions}</span>
-                ) : (
-                  c.unread > 0 && <span className="badge">{c.unread}</span>
-                )}
-              </button>
-            ))}
-
-            <div className="side-section">
-              <span>ダイレクトメッセージ</span>
-              <button className="icon-btn" aria-label="メンバー一覧" title="メンバー一覧" onClick={() => setModal('members')}>
-                ＋
-              </button>
-            </div>
-            {overview.dms.map((d) => {
-              const u = members.find((m) => m.id === d.userId)
-              return (
-                <button
-                  key={d.id}
-                  className={`side-item${d.id === channelId && !results ? ' active' : ''}${d.unread > 0 ? ' unread' : ''}`}
-                  onClick={() => selectChannel(d.id)}
-                >
-                  <span>
-                    <Avatar name={u?.displayName ?? '?'} url={u?.avatarUrl ?? null} size={18} online={onlineIds.has(d.userId)} /> {u?.displayName ?? '(退会済み)'}
-                  </span>
-                  {d.mentions > 0 ? (
-                    <span className="badge badge-mention">@{d.mentions}</span>
-                  ) : (
-                    d.unread > 0 && <span className="badge">{d.unread}</span>
-                  )}
-                </button>
-              )
-            })}
-          </div>
-        )}
-
-        <div className="side-foot">
-          <button className="me" onClick={() => setModal('profile')} title="プロフィール設定">
-            <Avatar name={user.displayName} url={user.avatarUrl} size={32} />
-            <span className="me-text">
-              <strong>{user.displayName}</strong>
-              <span className="muted small">{user.status || '@' + user.username}</span>
-            </span>
-          </button>
-          <button onClick={onLogout}>ログアウト</button>
-        </div>
-      </aside>
+      <Sidebar
+        user={user}
+        workspaces={workspaces}
+        wsId={wsId}
+        overview={overview}
+        channelId={channelId}
+        searching={!!results}
+        members={members}
+        onlineIds={onlineIds}
+        open={navOpen}
+        onSelectWorkspace={setWsId}
+        onSelectChannel={selectChannel}
+        onOpenModal={setModal}
+        onLogout={onLogout}
+      />
 
       <main className="main">
         {!wsId || !overview ? (
@@ -430,70 +367,34 @@ export function Chat({ user, onUserChange, onLogout }: Props) {
           </div>
         ) : (
           <>
-            <header className="topbar">
-              <button className="icon-btn menu-btn" aria-label="メニューを開く" onClick={() => setNavOpen(true)}>
-                ☰
-                {totalUnread > 0 && <span className="menu-dot" />}
-              </button>
-              <div className="title">
-                {dm ? (
-                  <strong>{dmUser?.displayName ?? 'DM'}</strong>
-                ) : channel ? (
-                  <strong>
-                    {channel.isPrivate ? '🔒' : '#'} {channel.name}
-                  </strong>
-                ) : (
-                  <strong>{overview.workspace.name}</strong>
-                )}
-                {isOwner && <span className="owner-tag">オーナー</span>}
-              </div>
-              <form className="search" onSubmit={doSearch} role="search">
-                <input
-                  value={searchText}
-                  onChange={(e) => setSearchText(e.target.value)}
-                  placeholder="メッセージを検索"
-                  aria-label="メッセージを検索"
-                />
-              </form>
-              <div className="top-actions">
-                {channel && channel.joined === 1 && (
-                  <button onClick={() => setModal('channelMembers')}>メンバー</button>
-                )}
-                <button onClick={() => setModal('members')}>ワークスペース</button>
-                {isOwner && channel && channel.name !== 'general' && (
-                  <button className="danger" onClick={() => void deleteChannel()}>
-                    チャンネル削除
-                  </button>
-                )}
-              </div>
-            </header>
+            <TopBar
+              overview={overview}
+              channel={channel}
+              dm={dm}
+              dmUser={dmUser}
+              isOwner={isOwner}
+              totalUnread={totalUnread}
+              searchText={searchText}
+              onSearchText={setSearchText}
+              onSearch={doSearch}
+              onOpenMenu={() => setNavOpen(true)}
+              onOpenModal={setModal}
+              onDeleteChannel={deleteChannel}
+            />
 
             <div className="content">
               <section className="pane">
                 {results ? (
-                  <div className="messages">
-                    <div className="row between">
-                      <h3>「{searchText}」の検索結果 ({results.length}件)</h3>
-                      <button onClick={() => setResults(null)}>閉じる</button>
-                    </div>
-                    {results.length === 0 && <p className="muted">該当するメッセージはありません</p>}
-                    {results.map((r) => (
-                      <button
-                        key={r.id}
-                        className="result"
-                        onClick={() => {
-                          setResults(null)
-                          selectChannel(r.channelId)
-                          setThreadId(r.parentId ?? null)
-                        }}
-                      >
-                        <div className="muted small">
-                          {r.isDm ? 'DM' : `# ${r.channelName}`} ・ {r.displayName} ・ {formatTime(r.createdAt)}
-                        </div>
-                        <div>{r.content}</div>
-                      </button>
-                    ))}
-                  </div>
+                  <SearchResults
+                    results={results}
+                    searchText={searchText}
+                    onClose={() => setResults(null)}
+                    onPick={(r) => {
+                      setResults(null)
+                      selectChannel(r.channelId)
+                      setThreadId(r.parentId ?? null)
+                    }}
+                  />
                 ) : !channelId ? (
                   <div className="empty muted">チャンネルを選択してください</div>
                 ) : !canRead || forbidden ? (
@@ -505,74 +406,40 @@ export function Chat({ user, onUserChange, onLogout }: Props) {
                     </button>
                   </div>
                 ) : (
-                  <>
-                    <div
-                      className="messages"
-                      onScroll={(e) => {
-                        const el = e.currentTarget
-                        stickBottom.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80
-                      }}
-                    >
-                      {messages.length === 0 && <p className="muted">まだメッセージはありません。最初の投稿をしてみましょう。</p>}
-                      {messages.map((m) => (
-                        <MessageItem
-                          key={m.id}
-                          msg={m}
-                          me={user}
-                          members={members}
-                          onlineIds={onlineIds}
-                          onChanged={refresh}
-                          onOpenThread={setThreadId}
-                          onError={showToast}
-                        />
-                      ))}
-                      <div ref={listEnd} />
-                    </div>
-                    <div className="typing" aria-live="polite">
-                      {typingText}
-                    </div>
-                    <Composer
-                      key={channelId}
-                      placeholder={dm ? `${dmUser?.displayName ?? ''}へのメッセージ` : `#${channel?.name ?? ''} へのメッセージ`}
-                      members={members}
-                      onSend={(d) => post(d)}
-                      onTyping={notifyTyping}
-                    />
-                  </>
+                  <MessagePane
+                    messages={messages}
+                    user={user}
+                    members={members}
+                    onlineIds={onlineIds}
+                    listEnd={listEnd}
+                    onNearBottomChange={(near) => {
+                      stickBottom.current = near
+                    }}
+                    typingText={typingText}
+                    composerKey={channelId}
+                    placeholder={dm ? `${dmUser?.displayName ?? ''}へのメッセージ` : `#${channel?.name ?? ''} へのメッセージ`}
+                    onChanged={refresh}
+                    onOpenThread={setThreadId}
+                    onError={showToast}
+                    onSend={(d) => post(d)}
+                    onTyping={notifyTyping}
+                  />
                 )}
               </section>
 
               {threadId && !results && (
-                <aside className="thread">
-                  <div className="row between">
-                    <h3>スレッド</h3>
-                    <button className="icon-btn" aria-label="スレッドを閉じる" onClick={() => setThreadId(null)}>
-                      ✕
-                    </button>
-                  </div>
-                  {thread ? (
-                    <>
-                      <div className="messages">
-                        <MessageItem msg={thread.parent} me={user} members={members} onlineIds={onlineIds} inThread onChanged={refresh} onError={showToast} />
-                        <div className="divider muted small">{thread.replies.length}件の返信</div>
-                        {thread.replies.map((m) => (
-                          <MessageItem key={m.id} msg={m} me={user} members={members} onlineIds={onlineIds} inThread onChanged={refresh} onError={showToast} />
-                        ))}
-                      </div>
-                      {!thread.parent.deleted && (
-                        <Composer
-                          key={`t${threadId}`}
-                          placeholder="返信する"
-                          members={members}
-                          onSend={(d) => post(d, thread.parent.id)}
-                          onTyping={notifyTyping}
-                        />
-                      )}
-                    </>
-                  ) : (
-                    <p className="muted">読み込み中...</p>
-                  )}
-                </aside>
+                <ThreadPane
+                  thread={thread}
+                  threadId={threadId}
+                  user={user}
+                  members={members}
+                  onlineIds={onlineIds}
+                  onClose={() => setThreadId(null)}
+                  onChanged={refresh}
+                  onError={showToast}
+                  onSend={post}
+                  onTyping={notifyTyping}
+                />
               )}
             </div>
           </>
