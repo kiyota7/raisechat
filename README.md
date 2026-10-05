@@ -26,7 +26,7 @@ cd frontend && npm install && npm run dev
 ```
 
 http://localhost:5173 を開き、新規登録(ユーザーID+パスワードのみ)から始めます。
-テストは `cd backend && mvn test`。
+テストは `cd backend && mvn test`(バックエンド)、`cd frontend && npm test`(フロントエンド)。
 
 ### CI
 
@@ -35,7 +35,7 @@ GitHub Actions(`.github/workflows/ci.yml`)が、PRと `main` へのpushのたび
 | ジョブ | 内容 |
 |---|---|
 | Backend | `cd backend && mvn test`(Java 21) |
-| Frontend | `cd frontend && npm ci && npm run lint && npm run build`(Node 24) |
+| Frontend | `cd frontend && npm ci && npm run lint && npm test && npm run build`(Node 24) |
 
 手元で同じ確認をするには、上のコマンドをそのまま実行する。リントは `--deny-warnings` のため、**警告(warning)があっても失敗する**。やむを得ず抑制する場合は、`oxlint-disable-next-line` に理由のコメントを添える。
 
