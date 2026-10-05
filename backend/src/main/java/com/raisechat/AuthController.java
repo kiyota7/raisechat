@@ -126,8 +126,13 @@ public class AuthController {
 		return storage.save(file, false);
 	}
 
+	/** ユーザーの情報。トークンは有効でも、ユーザーが存在しない(DBを作り直した後や削除後の古いログイン状態)ときは401 */
 	private Map<String, Object> user(long uid) {
-		return jdbc.queryForList(USER_SQL, uid).get(0);
+		List<Map<String, Object>> rows = jdbc.queryForList(USER_SQL, uid);
+		if (rows.isEmpty()) {
+			throw new ApiException(HttpStatus.UNAUTHORIZED, "セッションが無効です。再度ログインしてください");
+		}
+		return rows.get(0);
 	}
 
 	private Map<String, Object> session(long uid) {
