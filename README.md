@@ -105,6 +105,7 @@ cd backend && mvn spring-boot:run
 - 制限中は、**正しいパスワードでも拒否する**。成功したら、そのユーザーID+IPの失敗回数をリセットする
 - 存在しないユーザーIDも同じように数え、パスワードの照合にかかる時間も揃えて、IDの有無が分からないようにしている
 - 設定: `app.login.max-failures`(5)、`app.login.ip-max-failures`(20)、`app.login.window-minutes`(15)。環境変数なら `APP_LOGIN_MAX_FAILURES` など
+- 登録APIも、同じIPからの試行を制限する(成功・失敗とも数える)。`app.register.max-per-ip`(10)、`app.register.window-minutes`(60)。超えると429(Retry-Afterつき)。複数台のときはRedisで共有する
 - **失敗回数はサーバーのメモリ上**にある。再起動で消え、サーバーを複数台にする場合は、台ごとに数える(共有するにはRedisなどが必要)
 - **リバースプロキシ配下で使うとき:** 既定では接続元のIPをそのまま使うので、全員がプロキシのIPとして数えられ、IPごとの制限に巻き込まれる。プロキシが `X-Forwarded-For` を付ける構成なら、`server.forward-headers-strategy=native` を設定する(プロキシ以外から直接届かないことが前提。そうでないと、ヘッダーを偽って制限を回避される)
 

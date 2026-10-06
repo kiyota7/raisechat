@@ -29,16 +29,18 @@ public class AuthController {
 	private final FileStorage storage;
 	private final Realtime realtime;
 	private final LoginAttemptLimiter limiter;
+	private final RegistrationLimiter registrationLimiter;
 	private final BCryptPasswordEncoder encoder = new BCryptPasswordEncoder();
 	/** 存在しないユーザーIDのときも、パスワードの照合にかかる時間を揃えるためのダミー */
 	private final String dummyHash = encoder.encode("raisechat-dummy-password");
 
-	public AuthController(JdbcTemplate jdbc, JwtService jwt, FileStorage storage, Realtime realtime, LoginAttemptLimiter limiter) {
+	public AuthController(JdbcTemplate jdbc, JwtService jwt, FileStorage storage, Realtime realtime, LoginAttemptLimiter limiter, RegistrationLimiter registrationLimiter) {
 		this.jdbc = jdbc;
 		this.jwt = jwt;
 		this.storage = storage;
 		this.realtime = realtime;
 		this.limiter = limiter;
+		this.registrationLimiter = registrationLimiter;
 	}
 
 	public record RegisterRequest(
@@ -59,7 +61,8 @@ public class AuthController {
 	}
 
 	@PostMapping("/auth/register")
-	public Map<String, Object> register(@Valid @RequestBody RegisterRequest req) {
+	public Map<String, Object> register(@Valid @RequestBody RegisterRequest req, HttpServletRequest http) {
+		registrationLimiter.attempt(http.getRemoteAddr());
 		PasswordPolicy.check(req.username(), req.password()).ifPresent(msg -> {
 			throw new ApiException(HttpStatus.BAD_REQUEST, msg);
 		});
