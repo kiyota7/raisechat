@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react'
 import { api, type ThreadData } from './api'
-import { send } from './realtime'
 import type { Draft } from './Composer'
 import { ChannelMembersModal, MembersModal, ProfileModal, TextModal } from './chat/modals'
 import { MessagePane } from './chat/MessagePane'
@@ -10,8 +9,6 @@ import { ThreadPane } from './chat/ThreadPane'
 import { TopBar } from './chat/TopBar'
 import type { ModalType } from './chat/types'
 import { useChatRealtime } from './chat/useChatRealtime'
-import { useOnlineUsers } from './chat/useOnlineUsers'
-import { useTyping } from './chat/useTyping'
 import type { Message, Overview, SearchResult, User, Workspace } from './types'
 
 interface Props {
@@ -36,7 +33,6 @@ export function Chat({ user, onUserChange, onLogout }: Props) {
   const [results, setResults] = useState<SearchResult[] | null>(null)
   const [toast, setToast] = useState('')
   const [navOpen, setNavOpen] = useState(false)
-  const { onlineIds, replaceOnline } = useOnlineUsers()
   const lastSeenMsg = useRef(0)
   const lastRead = useRef(0)
   const prevMentions = useRef(0)
@@ -80,7 +76,6 @@ export function Chat({ user, onUserChange, onLogout }: Props) {
     try {
       const ov = await api.get<Overview>(`/workspaces/${wsId}`)
       setOverview(ov)
-      replaceOnline(ov.onlineUserIds)
       const mentions = [...ov.channels, ...ov.dms].reduce((s, c) => s + c.mentions, 0)
       if (mentions > prevMentions.current) showToast('メンションされました')
       prevMentions.current = mentions
@@ -88,7 +83,7 @@ export function Chat({ user, onUserChange, onLogout }: Props) {
       // キックされた場合などはワークスペース一覧を取り直す
       if ((e as { status?: number }).status === 403) void loadWorkspaces()
     }
-  }, [wsId, loadWorkspaces, showToast, replaceOnline])
+  }, [wsId, loadWorkspaces, showToast])
   useEffect(() => {
     // 非同期のデータ取得。setStateは await の後で呼ばれる
     // oxlint-disable-next-line react/set-state-in-effect
@@ -106,8 +101,6 @@ export function Chat({ user, onUserChange, onLogout }: Props) {
   const dmUser = dm ? overview?.members.find((m) => m.id === dm.userId) : undefined
   const isOwner = overview?.workspace.ownerId === user.id
   const canRead = !!channelId && (!!dm || channel?.joined === 1)
-
-  const { typingIds, clearTyping } = useTyping(channelId, canRead, user.id)
 
   // チャンネルを切り替えたら、前のチャンネルのメッセージとスレッドを捨てる(描画中の状態調整)
   const [shownChannelId, setShownChannelId] = useState(channelId)
@@ -131,9 +124,6 @@ export function Chat({ user, onUserChange, onLogout }: Props) {
       const last = list.length ? list[list.length - 1].id : 0
       if (last > lastSeenMsg.current) {
         lastSeenMsg.current = last
-        // 投稿された時点で、その人の「入力中」は消す
-        const author = list[list.length - 1]?.userId
-        if (author !== undefined) clearTyping(author)
       }
       if (last > lastRead.current) {
         lastRead.current = last
@@ -142,7 +132,7 @@ export function Chat({ user, onUserChange, onLogout }: Props) {
     } catch (e) {
       if ((e as { status?: number }).status === 403) setForbidden(true)
     }
-  }, [channelId, canRead, clearTyping])
+  }, [channelId, canRead])
   useEffect(() => {
     // 非同期のデータ取得。setStateは await の後で呼ばれる
     // oxlint-disable-next-line react/set-state-in-effect
@@ -235,12 +225,6 @@ export function Chat({ user, onUserChange, onLogout }: Props) {
   if (!loaded) return <div className="center-screen">読み込み中...</div>
 
   const members = overview?.members ?? []
-  const typingNames = typingIds.map((id) => members.find((m) => m.id === id)?.displayName).filter((n): n is string => !!n)
-  const typingText =
-    typingNames.length === 0 ? '' : typingNames.length <= 2 ? `${typingNames.join('、')}が入力中...` : `${typingNames.length}人が入力中...`
-  const notifyTyping = () => {
-    if (channelId) send('/app/typing', { channelId })
-  }
 
   return (
     <div className="app">
@@ -253,7 +237,6 @@ export function Chat({ user, onUserChange, onLogout }: Props) {
         channelId={channelId}
         searching={!!results}
         members={members}
-        onlineIds={onlineIds}
         open={navOpen}
         onSelectWorkspace={setWsId}
         onSelectChannel={selectChannel}
@@ -321,19 +304,16 @@ export function Chat({ user, onUserChange, onLogout }: Props) {
                     messages={messages}
                     user={user}
                     members={members}
-                    onlineIds={onlineIds}
                     listEnd={listEnd}
                     onNearBottomChange={(near) => {
                       stickBottom.current = near
                     }}
-                    typingText={typingText}
                     composerKey={channelId}
                     placeholder={dm ? `${dmUser?.displayName ?? ''}へのメッセージ` : `#${channel?.name ?? ''} へのメッセージ`}
                     onChanged={refresh}
                     onOpenThread={setThreadId}
                     onError={showToast}
                     onSend={(d) => post(d)}
-                    onTyping={notifyTyping}
                   />
                 )}
               </section>
@@ -344,12 +324,10 @@ export function Chat({ user, onUserChange, onLogout }: Props) {
                   threadId={threadId}
                   user={user}
                   members={members}
-                  onlineIds={onlineIds}
                   onClose={() => setThreadId(null)}
                   onChanged={refresh}
                   onError={showToast}
                   onSend={post}
-                  onTyping={notifyTyping}
                 />
               )}
             </div>
@@ -424,7 +402,6 @@ export function Chat({ user, onUserChange, onLogout }: Props) {
           wsId={wsId}
           user={user}
           isOwner={isOwner}
-          onlineIds={onlineIds}
           onOpenDm={openDm}
           onChanged={loadOverview}
           onError={showToast}

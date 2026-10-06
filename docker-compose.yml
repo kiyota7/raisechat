@@ -36,7 +36,7 @@ services:
       SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/raisechat
       SPRING_DATASOURCE_USERNAME: raisechat
       SPRING_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD}
-      # 複数台で、通知・オンライン状態・ログイン失敗回数をRedisで共有する
+      # 複数台で、通知・ログイン失敗回数をRedisで共有する
       APP_CLUSTER_MODE: redis
       SPRING_DATA_REDIS_HOST: redis
       # 全台で同じ値にする(異なると、別の台で発行したログインが無効になる)

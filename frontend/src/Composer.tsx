@@ -12,13 +12,9 @@ interface Props {
   placeholder: string
   members: User[]
   onSend: (d: Draft) => Promise<void>
-  /** 入力中に呼ばれる(呼び出し側で通知する)。連続入力では一定間隔にまとめて呼ぶ */
-  onTyping?: () => void
 }
 
-const TYPING_INTERVAL_MS = 2000
-
-export function Composer({ placeholder, members, onSend, onTyping }: Props) {
+export function Composer({ placeholder, members, onSend }: Props) {
   const [text, setText] = useState('')
   const [file, setFile] = useState<File | null>(null)
   const [busy, setBusy] = useState(false)
@@ -26,15 +22,6 @@ export function Composer({ placeholder, members, onSend, onTyping }: Props) {
   const [cursor, setCursor] = useState(0)
   const area = useRef<HTMLTextAreaElement>(null)
   const fileInput = useRef<HTMLInputElement>(null)
-  const lastTyping = useRef(0)
-
-  const notifyTyping = (value: string) => {
-    if (!onTyping || !value.trim()) return
-    const now = Date.now()
-    if (now - lastTyping.current < TYPING_INTERVAL_MS) return
-    lastTyping.current = now
-    onTyping()
-  }
 
   const before = text.slice(0, cursor)
   const m = /(^|\s)@([A-Za-z0-9_]*)$/.exec(before)
@@ -125,7 +112,6 @@ export function Composer({ placeholder, members, onSend, onTyping }: Props) {
           onChange={(e) => {
             setText(e.target.value)
             setCursor(e.target.selectionStart)
-            notifyTyping(e.target.value)
           }}
           onSelect={(e) => setCursor(e.currentTarget.selectionStart)}
           onKeyDown={onKeyDown}

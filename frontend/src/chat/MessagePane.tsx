@@ -7,12 +7,10 @@ interface Props {
   messages: Message[]
   user: User
   members: User[]
-  onlineIds: Set<number>
   /** 一覧の末尾の目印。新着時に、末尾付近を見ていればここまでスクロールする */
   listEnd: RefObject<HTMLDivElement | null>
   /** 末尾付近(80px以内)を見ているかが変わったとき */
   onNearBottomChange: (nearBottom: boolean) => void
-  typingText: string
   /** チャンネルが変わったら入力欄をリセットするためのキー */
   composerKey: number | null
   placeholder: string
@@ -20,7 +18,6 @@ interface Props {
   onOpenThread: (id: number) => void
   onError: (message: string) => void
   onSend: (d: Draft) => Promise<void>
-  onTyping: () => void
 }
 
 export function MessagePane(p: Props) {
@@ -41,7 +38,6 @@ export function MessagePane(p: Props) {
             msg={m}
             me={p.user}
             members={p.members}
-            onlineIds={p.onlineIds}
             onChanged={p.onChanged}
             onOpenThread={p.onOpenThread}
             onError={p.onError}
@@ -49,10 +45,7 @@ export function MessagePane(p: Props) {
         ))}
         <div ref={listEnd} />
       </div>
-      <div className="typing" aria-live="polite">
-        {p.typingText}
-      </div>
-      <Composer key={p.composerKey} placeholder={p.placeholder} members={p.members} onSend={p.onSend} onTyping={p.onTyping} />
+      <Composer key={p.composerKey} placeholder={p.placeholder} members={p.members} onSend={p.onSend} />
     </>
   )
 }

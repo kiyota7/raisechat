@@ -7,7 +7,7 @@ import java.util.Map;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Component;
 
-/** サイドバー表示用の、ワークスペースの概要(メンバー・オンライン・チャンネル・DM・未読数)を組み立てる */
+/** サイドバー表示用の、ワークスペースの概要(メンバー・チャンネル・DM・未読数)を組み立てる */
 @Component
 public class WorkspaceOverview {
 	/** 未読数とメンション数(自分の投稿は数えない。最後に読んだメッセージより後のもの)。パラメーターは3つ(uid, uid, uid) */
@@ -19,13 +19,11 @@ public class WorkspaceOverview {
 	private final JdbcTemplate jdbc;
 	private final Access access;
 	private final Realtime realtime;
-	private final PresenceService presence;
 
-	public WorkspaceOverview(JdbcTemplate jdbc, Access access, Realtime realtime, PresenceService presence) {
+	public WorkspaceOverview(JdbcTemplate jdbc, Access access, Realtime realtime) {
 		this.jdbc = jdbc;
 		this.access = access;
 		this.realtime = realtime;
-		this.presence = presence;
 	}
 
 	public Map<String, Object> build(long uid, long workspaceId) {
@@ -34,7 +32,6 @@ public class WorkspaceOverview {
 		res.put("members", jdbc.queryForList(
 				"SELECT u.id, u.username, u.display_name AS \"displayName\", u.status, u.avatar_url AS \"avatarUrl\" "
 						+ "FROM users u JOIN workspace_members m ON m.user_id = u.id WHERE m.workspace_id = ? ORDER BY u.id", workspaceId));
-		res.put("onlineUserIds", presence.onlineAmong(realtime.workspaceMembers(workspaceId)));
 		List<Map<String, Object>> channels = jdbc.queryForList(
 				"SELECT c.id, c.name, c.is_private AS \"isPrivate\", CASE WHEN cm.user_id IS NOT NULL THEN 1 ELSE 0 END AS joined, " + COUNTS
 						+ " FROM channels c LEFT JOIN channel_members cm ON cm.channel_id = c.id AND cm.user_id = ? "

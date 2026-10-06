@@ -11,15 +11,13 @@ interface Props {
   msg: Message
   me: User
   members: User[]
-  /** オンラインのユーザーID。未指定ならオンライン表示をしない */
-  onlineIds?: Set<number>
   inThread?: boolean
   onChanged: () => void
   onOpenThread?: (id: number) => void
   onError: (m: string) => void
 }
 
-export function MessageItem({ msg, me, members, onlineIds, inThread, onChanged, onOpenThread, onError }: Props) {
+export function MessageItem({ msg, me, members, inThread, onChanged, onOpenThread, onError }: Props) {
   const [editing, setEditing] = useState(false)
   const [draft, setDraft] = useState(msg.content)
   const [picker, setPicker] = useState(false)
@@ -60,7 +58,7 @@ export function MessageItem({ msg, me, members, onlineIds, inThread, onChanged, 
   const mine = msg.userId === me.id
   return (
     <div className="msg" data-testid="message">
-      <Avatar name={msg.displayName} url={msg.avatarUrl} online={onlineIds?.has(msg.userId)} />
+      <Avatar name={msg.displayName} url={msg.avatarUrl} />
       <div className="msg-main">
         <div className="msg-head">
           <strong>{msg.displayName}</strong>

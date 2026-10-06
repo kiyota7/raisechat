@@ -61,12 +61,6 @@ export function subscribe(dest: string, cb: Handler): () => void {
   }
 }
 
-/** STOMPでサーバーへ送る(入力中の通知用)。未接続のときは何もしない */
-export function send(dest: string, body: unknown) {
-  if (!client?.connected) return
-  client.publish({ destination: dest, body: JSON.stringify(body), headers: { 'content-type': 'application/json' } })
-}
-
 /** 接続(再接続を含む)が確立するたびに呼ばれる */
 export function onReconnect(cb: () => void): () => void {
   reconnectCbs.add(cb)
