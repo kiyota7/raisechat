@@ -42,6 +42,9 @@ class MessageApiTest extends ApiTestBase {
 		assertEquals(400, status("POST", path, owner.token(), "{\"content\":\"   \"}")); // 空
 		assertEquals(400, status("POST", path, owner.token(), "{\"content\":\"" + "x".repeat(5001) + "\"}")); // 長すぎる
 		assertEquals(400, status("POST", path, owner.token(), "{\"content\":\"a\",\"attachmentUrl\":\"http://evil.example/x.png\"}")); // 添付が不正
+		for (String bad : new String[] { "/uploads/../api/me", "/uploads/a/b.png", "/uploads/", "/uploads/..", "/uploads/a.png?x=1", "/uploads/a b.png" }) {
+			assertEquals(400, status("POST", path, owner.token(), "{\"content\":\"a\",\"attachmentUrl\":\"" + bad + "\"}"), bad);
+		}
 		assertEquals(400, status("POST", path, owner.token(), "{\"content\":\"a\",\"parentId\":" + r + "}")); // 返信への返信
 		assertEquals(400, status("POST", path, owner.token(), "{\"content\":\"a\",\"parentId\":" + inOther + "}")); // 別チャンネルのメッセージへの返信
 		assertEquals(404, status("POST", path, owner.token(), "{\"content\":\"a\",\"parentId\":999999}")); // 返信先がない

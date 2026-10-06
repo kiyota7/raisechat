@@ -19,7 +19,7 @@ public class LocalFileStorage extends AbstractFileStorage {
 	}
 
 	@Override
-	protected void write(String storedName, MultipartFile file) throws IOException {
+	protected void write(String storedName, MultipartFile file, String contentType) throws IOException {
 		Files.createDirectories(dir);
 		file.transferTo(dir.resolve(storedName));
 	}

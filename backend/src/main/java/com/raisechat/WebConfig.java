@@ -41,6 +41,15 @@ public class WebConfig implements WebMvcConfigurer {
 				return true;
 			}
 		}).addPathPatterns("/api/**").excludePathPatterns("/api/auth/register", "/api/auth/login");
+		// アップロードされたファイルは、ブラウザに種類を推測させず、ページとして実行もさせない
+		registry.addInterceptor(new HandlerInterceptor() {
+			@Override
+			public boolean preHandle(HttpServletRequest req, HttpServletResponse res, Object handler) {
+				res.setHeader("X-Content-Type-Options", "nosniff");
+				res.setHeader("Content-Security-Policy", "default-src 'none'; sandbox");
+				return true;
+			}
+		}).addPathPatterns("/uploads/**");
 	}
 
 	@Override

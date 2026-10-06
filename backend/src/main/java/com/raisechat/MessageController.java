@@ -63,7 +63,7 @@ public class MessageController {
 		if (content.isEmpty() && req.attachmentUrl() == null) {
 			throw new ApiException(HttpStatus.BAD_REQUEST, "メッセージを入力してください");
 		}
-		if (req.attachmentUrl() != null && !req.attachmentUrl().startsWith("/uploads/")) {
+		if (req.attachmentUrl() != null && !req.attachmentUrl().matches("/uploads/[A-Za-z0-9][A-Za-z0-9._-]*")) {
 			throw new ApiException(HttpStatus.BAD_REQUEST, "添付ファイルが不正です");
 		}
 		Long parentId = req.parentId();
