@@ -94,17 +94,10 @@ cd backend && mvn spring-boot:run
 **パスワード(登録時)**
 
 - 8文字以上64文字以内で、**72バイト以内**(BCryptの上限。日本語は1文字が3バイトなので、24文字程度まで)
-- ユーザーIDを含むもの、よくある弱いパスワード(`12345678`、`password1` など)、同じ文字の繰り返し、連続した並び(`abcdefgh` など)は使えない
 
-**ログイン試行の制限**
+**ログイン**
 
-- 失敗が続くと、一時的に拒否する(HTTP 429 + `Retry-After`)。**ユーザーID+IPごとに5回**、**IPごとに20回**(別のユーザーIDを順に試す攻撃への対策)、いずれも15分間
-- 制限中は、**正しいパスワードでも拒否する**。成功したら、そのユーザーID+IPの失敗回数をリセットする
-- 存在しないユーザーIDも同じように数え、パスワードの照合にかかる時間も揃えて、IDの有無が分からないようにしている
-- 設定: `app.login.max-failures`(5)、`app.login.ip-max-failures`(20)、`app.login.window-minutes`(15)。環境変数なら `APP_LOGIN_MAX_FAILURES` など
-- 登録APIも、同じIPからの試行を制限する(成功・失敗とも数える)。`app.register.max-per-ip`(10)、`app.register.window-minutes`(60)。超えると429(Retry-Afterつき)。複数台のときはRedisで共有する
-- **失敗回数の保存先:** 既定ではサーバーのメモリ上にあり、再起動で消える。`app.cluster.mode=redis` のときはRedisに置き、複数台の全サーバーで合算する(→ 下の「複数サーバーで動かす(Redis)」)
-- **リバースプロキシ配下で使うとき:** 既定では接続元のIPをそのまま使うので、全員がプロキシのIPとして数えられ、IPごとの制限に巻き込まれる。プロキシが `X-Forwarded-For` を付ける構成なら、`server.forward-headers-strategy=native` を設定する(プロキシ以外から直接届かないことが前提。そうでないと、ヘッダーを偽って制限を回避される)
+- 存在しないユーザーIDでもパスワードの照合を行い、応答時間の差からIDの有無が分からないようにしている
 
 ## 本番のデプロイ(HTTPS)
 
@@ -117,12 +110,11 @@ cd backend && mvn spring-boot:run
 
 ## 複数サーバーで動かす(Redis)
 
-既定では、通知・ログインの失敗回数が、**サーバー1台のメモリ上**にある。バックエンドを複数台にすると、別のサーバーに繋がっている人に通知が届かず、ログイン失敗の回数も台ごとになる。`app.cluster.mode=redis` にすると、Redisで共有する。
+既定では、通知が、**サーバー1台のメモリ上**にある。バックエンドを複数台にすると、別のサーバーに繋がっている人に通知が届かず、ログイン失敗の回数も台ごとになる。`app.cluster.mode=redis` にすると、Redisで共有する。
 
 | 共有するもの | 仕組み |
 |---|---|
 | 通知(メッセージ・サイドバー更新など) | 各サーバーがRedisのチャンネル(`{prefix}:events`)に発行し、全サーバーが受信して、自分に繋がっている人へ届ける |
-| ログインの失敗回数 | Redisに記録し、全サーバーの失敗をまとめて数える |
 
 ```bash
 # Redisを用意する(開発用)
@@ -197,13 +189,13 @@ docker compose up --build
 | サービス | 内容 |
 |---|---|
 | `frontend` | nginx。画面を配信し、`/api`・`/uploads`・`/ws`(WebSocket)をバックエンドへ中継する。**公開するのは、このポート(5173)だけ** |
-| `backend` | 既定2台。`BACKEND_REPLICAS` で台数を変えられる。通知・ログイン失敗回数は、Redisで共有する |
+| `backend` | 既定2台。`BACKEND_REPLICAS` で台数を変えられる。通知は、Redisで共有する |
 | `postgres` / `redis` | データは、`pgdata` ボリュームに保存される |
 
 - **秘密情報:** `JWT_SECRET`(例 `openssl rand -base64 48`)と `POSTGRES_PASSWORD` は、`.env` で必ず指定する(既定値は置いていない)。`.env` は、gitに入らない。postgres プロファイルや `app.cluster.mode=redis` では、開発用の既定値や32バイト未満の `JWT_SECRET` だと、バックエンドが起動時にエラーで止まる
 - **ポート:** 5173が使用中(ローカルの開発用サーバーなど)だと、起動に失敗する。別のポートに逃がさず、先に止める
 - **データ:** `docker compose down` では、データ(PostgreSQL・添付ファイル)は残る。**`docker compose down -v` は、データも削除する**
-- **接続元のIP:** nginxが `X-Forwarded-For` を付け、バックエンドは `SERVER_FORWARD_HEADERS_STRATEGY=native` で、それを使う(ログイン失敗の回数制限が、接続元ごとに働く)。ただし、nginxの手前にさらにプロキシを置く場合は、そのプロキシのIPで数えられる
+- **接続元のIP:** nginxが `X-Forwarded-For` を付け、バックエンドは `SERVER_FORWARD_HEADERS_STRATEGY=native` で、それを使う
 - **添付ファイル:** バックエンドの複数台で、同じボリュームを共有する(同じマシンの中だけ)。複数ホストに分けるときは、S3を使う
 - ログ: `docker compose logs -f backend` / 状態: `docker compose ps`
 - 環境の作り方・構成の詳細は、上の「複数サーバーで動かす」「PostgreSQLで動かす」を参照
