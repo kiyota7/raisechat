@@ -125,7 +125,7 @@ docker run -d --name raisechat-redis -p 6379:6379 redis:7-alpine
 # 全サーバー共通の設定
 export APP_CLUSTER_MODE=redis
 export SPRING_DATA_REDIS_HOST=localhost      # 既定のポートは6379(SPRING_DATA_REDIS_PORT)
-export JWT_SECRET='全サーバーで同じ値'          # 異なると、別のサーバーで発行したログインが無効になる
+export JWT_SECRET='全サーバーで同じ値(32バイト以上)'   # 異なると、別のサーバーで発行したログインが無効になる。開発用の既定値のままだと起動しない
 
 # 1台目(固定ポート8080)
 cd backend && mvn spring-boot:run
@@ -194,7 +194,7 @@ docker compose up --build
 | `backend` | 既定2台。`BACKEND_REPLICAS` で台数を変えられる。通知・オンライン状態・ログイン失敗回数は、Redisで共有する |
 | `postgres` / `redis` | データは、`pgdata` ボリュームに保存される |
 
-- **秘密情報:** `JWT_SECRET`(例 `openssl rand -base64 48`)と `POSTGRES_PASSWORD` は、`.env` で必ず指定する(既定値は置いていない)。`.env` は、gitに入らない
+- **秘密情報:** `JWT_SECRET`(例 `openssl rand -base64 48`)と `POSTGRES_PASSWORD` は、`.env` で必ず指定する(既定値は置いていない)。`.env` は、gitに入らない。postgres プロファイルや `app.cluster.mode=redis` では、開発用の既定値や32バイト未満の `JWT_SECRET` だと、バックエンドが起動時にエラーで止まる
 - **ポート:** 5173が使用中(ローカルの開発用サーバーなど)だと、起動に失敗する。別のポートに逃がさず、先に止める
 - **データ:** `docker compose down` では、データ(PostgreSQL・添付ファイル)は残る。**`docker compose down -v` は、データも削除する**
 - **接続元のIP:** nginxが `X-Forwarded-For` を付け、バックエンドは `SERVER_FORWARD_HEADERS_STRATEGY=native` で、それを使う(ログイン失敗の回数制限が、接続元ごとに働く)。ただし、nginxの手前にさらにプロキシを置く場合は、そのプロキシのIPで数えられる
