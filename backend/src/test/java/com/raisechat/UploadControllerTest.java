@@ -13,7 +13,7 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.test.web.servlet.MockMvc;
 
 /** S3モードの配信: /uploads/{ファイル名} が、署名付きURLへのリダイレクトになる(ネットワーク不要) */
-@SpringBootTest(properties = { "spring.datasource.url=jdbc:sqlite:target/test-${random.uuid}.db?foreign_keys=true",
+@SpringBootTest(properties = { TestDb.URL, TestDb.DRIVER, TestDb.POOL, TestDb.USER, TestDb.PASSWORD,
 		"app.storage.type=s3", "app.storage.s3.bucket=test-bucket", "app.storage.s3.region=ap-northeast-1" })
 @AutoConfigureMockMvc
 class UploadControllerTest {

@@ -12,7 +12,7 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.messaging.simp.stomp.StompSession;
 
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
-		properties = { "spring.datasource.url=jdbc:sqlite:target/test-${random.uuid}.db?foreign_keys=true", "app.presence.offline-grace-ms=300" })
+		properties = { TestDb.URL, TestDb.DRIVER, TestDb.POOL, TestDb.USER, TestDb.PASSWORD, "app.presence.offline-grace-ms=300" })
 class PresenceTest extends StompTestBase {
 	/** 指定ユーザーの変化(online=true/false)を待つ。他ユーザーの合図は読み飛ばす */
 	private static Map<String, Object> awaitPresence(BlockingQueue<Map<String, Object>> q, long userId, boolean online, long timeoutMs)

@@ -17,7 +17,7 @@ public class Access {
 
 	public Map<String, Object> workspace(long wsId) {
 		List<Map<String, Object>> rows = jdbc.queryForList(
-				"SELECT id, name, owner_id AS ownerId FROM workspaces WHERE id = ?", wsId);
+				"SELECT id, name, owner_id AS \"ownerId\" FROM workspaces WHERE id = ?", wsId);
 		if (rows.isEmpty()) {
 			throw new ApiException(HttpStatus.NOT_FOUND, "ワークスペースが見つかりません");
 		}
@@ -42,7 +42,7 @@ public class Access {
 
 	public Map<String, Object> channel(long channelId) {
 		List<Map<String, Object>> rows = jdbc.queryForList(
-				"SELECT id, workspace_id AS workspaceId, name, is_private AS isPrivate, is_dm AS isDm FROM channels WHERE id = ?",
+				"SELECT id, workspace_id AS \"workspaceId\", name, is_private AS \"isPrivate\", is_dm AS \"isDm\" FROM channels WHERE id = ?",
 				channelId);
 		if (rows.isEmpty()) {
 			throw new ApiException(HttpStatus.NOT_FOUND, "チャンネルが見つかりません");
@@ -64,7 +64,7 @@ public class Access {
 
 	public Map<String, Object> message(long messageId) {
 		List<Map<String, Object>> rows = jdbc.queryForList(
-				"SELECT id, channel_id AS channelId, user_id AS userId, parent_id AS parentId, deleted FROM messages WHERE id = ?",
+				"SELECT id, channel_id AS \"channelId\", user_id AS \"userId\", parent_id AS \"parentId\", deleted FROM messages WHERE id = ?",
 				messageId);
 		if (rows.isEmpty()) {
 			throw new ApiException(HttpStatus.NOT_FOUND, "メッセージが見つかりません");

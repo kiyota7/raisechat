@@ -54,7 +54,7 @@ public class ChannelController {
 	public List<Map<String, Object>> members(@RequestAttribute("userId") long uid, @PathVariable long id) {
 		access.requireChannelMember(id, uid);
 		return jdbc.queryForList(
-				"SELECT u.id, u.username, u.display_name AS displayName, u.status, u.avatar_url AS avatarUrl "
+				"SELECT u.id, u.username, u.display_name AS \"displayName\", u.status, u.avatar_url AS \"avatarUrl\" "
 						+ "FROM users u JOIN channel_members m ON m.user_id = u.id WHERE m.channel_id = ? ORDER BY u.id", id);
 	}
 
@@ -74,13 +74,14 @@ public class ChannelController {
 	@PostMapping("/{id}/read")
 	public void markRead(@RequestAttribute("userId") long uid, @PathVariable long id) {
 		Map<String, Object> ch = access.requireChannelMember(id, uid);
-		jdbc.update("UPDATE channel_members SET last_read_message_id = IFNULL((SELECT MAX(id) FROM messages WHERE channel_id = ?), 0) "
+		jdbc.update("UPDATE channel_members SET last_read_message_id = COALESCE((SELECT MAX(id) FROM messages WHERE channel_id = ?), 0) "
 				+ "WHERE channel_id = ? AND user_id = ?", id, id, uid);
 		realtime.overviewToUsers(((Number) ch.get("workspaceId")).longValue(), List.of(uid));
 	}
 
 	private void addMember(long channelId, long userId) {
-		jdbc.update("INSERT OR IGNORE INTO channel_members (channel_id, user_id, last_read_message_id) "
-				+ "VALUES (?, ?, IFNULL((SELECT MAX(id) FROM messages WHERE channel_id = ?), 0))", channelId, userId, channelId);
+		jdbc.update("INSERT INTO channel_members (channel_id, user_id, last_read_message_id) "
+				+ "VALUES (?, ?, COALESCE((SELECT MAX(id) FROM messages WHERE channel_id = ?), 0)) ON CONFLICT DO NOTHING",
+				channelId, userId, channelId);
 	}
 }

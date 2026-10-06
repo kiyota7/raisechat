@@ -22,7 +22,7 @@ import org.springframework.web.multipart.MultipartFile;
 public class AuthController {
 	private static final String USERNAME_TAKEN = "このユーザーIDは既に使われています";
 	private static final String USER_SQL =
-			"SELECT id, username, display_name AS displayName, status, avatar_url AS avatarUrl FROM users WHERE id = ?";
+			"SELECT id, username, display_name AS \"displayName\", status, avatar_url AS \"avatarUrl\" FROM users WHERE id = ?";
 
 	private final JdbcTemplate jdbc;
 	private final JwtService jwt;

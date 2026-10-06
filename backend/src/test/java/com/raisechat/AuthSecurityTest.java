@@ -25,7 +25,7 @@ import org.springframework.test.web.servlet.ResultActions;
 import org.springframework.test.web.servlet.request.RequestPostProcessor;
 
 /** 登録時のパスワード検査と、ログインの失敗回数の制限(APIを通して確認する)。専用の設定で、他のテストと制限の状態を分ける */
-@SpringBootTest(properties = { "spring.datasource.url=jdbc:sqlite:target/test-${random.uuid}.db?foreign_keys=true",
+@SpringBootTest(properties = { TestDb.URL, TestDb.DRIVER, TestDb.POOL, TestDb.USER, TestDb.PASSWORD,
 		"app.login.max-failures=3", "app.login.ip-max-failures=100", "app.login.window-minutes=15" })
 @AutoConfigureMockMvc
 class AuthSecurityTest {

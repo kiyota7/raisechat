@@ -26,8 +26,9 @@ public class MentionService {
 			names.add(mt.group(1));
 		}
 		for (String name : names) {
-			jdbc.update("INSERT OR IGNORE INTO mentions (message_id, user_id) "
-					+ "SELECT ?, u.id FROM users u JOIN workspace_members m ON m.user_id = u.id AND m.workspace_id = ? WHERE u.username = ?",
+			jdbc.update("INSERT INTO mentions (message_id, user_id) "
+					+ "SELECT CAST(? AS BIGINT), u.id FROM users u JOIN workspace_members m ON m.user_id = u.id AND m.workspace_id = ? WHERE u.username = ? "
+					+ "ON CONFLICT DO NOTHING",
 					messageId, workspaceId, name);
 		}
 	}

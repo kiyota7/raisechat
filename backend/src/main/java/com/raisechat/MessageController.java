@@ -90,7 +90,7 @@ public class MessageController {
 			@Valid @RequestBody EditRequest req) {
 		Map<String, Object> m = ownMessage(uid, id);
 		String content = req.content().trim();
-		jdbc.update("UPDATE messages SET content = ?, edited_at = strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id = ?", content, id);
+		jdbc.update("UPDATE messages SET content = ?, edited_at = ? WHERE id = ?", content, Timestamps.now(), id);
 		mentions.clear(id);
 		Map<String, Object> ch = access.channel(channelIdOf(m));
 		mentions.save(id, content, ((Number) ch.get("workspaceId")).longValue());

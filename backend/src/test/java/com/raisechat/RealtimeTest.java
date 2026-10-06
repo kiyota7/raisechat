@@ -12,7 +12,7 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.messaging.simp.stomp.StompSession;
 
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
-		properties = "spring.datasource.url=jdbc:sqlite:target/test-${random.uuid}.db?foreign_keys=true")
+		properties = { TestDb.URL, TestDb.DRIVER, TestDb.POOL, TestDb.USER, TestDb.PASSWORD })
 class RealtimeTest extends StompTestBase {
 	@Test
 	void connectRequiresValidJwt() throws Exception {

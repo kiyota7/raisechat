@@ -6,7 +6,7 @@ Slack風チャットアプリケーション(スクール上級編課題)。
 
 | 層 | 内容 |
 |---|---|
-| バックエンド | Java 21 / Spring Boot 3.5 / JdbcTemplate / Flyway / SQLite / JWT(jjwt) |
+| バックエンド | Java 21 / Spring Boot 3.5 / JdbcTemplate / Flyway / SQLite(既定)または PostgreSQL / JWT(jjwt) |
 | フロントエンド | React 19 + TypeScript / Vite / react-markdown(+GFM) |
 | ファイル保存 | 既定はローカルディスク。設定でAWS S3にも保存可能(下記「添付ファイルの保存先」) |
 | リアルタイム更新 | WebSocket (STOMP)。更新の合図のみ配信し、データはRESTで再取得。切断時は自動再接続。複数サーバーは、Redis Pub/Subで対応(下記「複数サーバーで動かす」) |
@@ -35,6 +35,7 @@ GitHub Actions(`.github/workflows/ci.yml`)が、PRと `main` へのpushのたび
 | ジョブ | 内容 |
 |---|---|
 | Backend | `cd backend && mvn test`(Java 21。複数サーバーのテストのため、Redisのサービスコンテナを使う) |
+| Backend (PostgreSQL) | 同じテストを、PostgreSQLのサービスコンテナで実行する(下記「PostgreSQLで動かす」の環境変数 `TEST_DB_*`) |
 | Frontend | `cd frontend && npm ci && npm run lint && npm test && npm run build`(Node 24) |
 
 手元で同じ確認をするには、上のコマンドをそのまま実行する。リントは `--deny-warnings` のため、**警告(warning)があっても失敗する**。やむを得ず抑制する場合は、`oxlint-disable-next-line` に理由のコメントを添える。
@@ -135,8 +136,42 @@ cd backend && mvn spring-boot:run -Dspring-boot.run.arguments=--server.port=8081
 
 **制約と注意点**
 
-- **データベース:** SQLiteは、同じマシン上の複数プロセスなら、同じファイルを共有できる(WAL)。**別のマシンに分けるには、ネットワーク越しのDB(PostgreSQLなど)への移行が別途必要**
+- **データベース:** SQLiteは、同じマシン上の複数プロセスなら、同じファイルを共有できる(WAL)。**別のマシンに分けるには、PostgreSQLを使う**(下記「PostgreSQLで動かす」)
 - **添付ファイル:** ローカルディスク保存では、別のサーバーのファイルが見えない。複数台では、S3(上記)か、共有ストレージを使う
 - **Redisに繋がらないとき:** 起動時に繋がらなければ、**起動に失敗する**(他のサーバーと通知をやり取りできない状態で動かないため)。稼働中に繋がらなくなった場合は、**APIは止めずに続ける**(通知は届かない / 概要のオンライン状態は全員オフライン / ログインの制限はかからない。警告をログに出す)。繋がり直せば、通知は再開する。取りこぼした分は、クライアントの再接続時の再取得で補われる
 - **ログインの制限:** 確認と記録が別々の操作なので、同時に大量に送られた場合は、上限を数件超えて通ることがある
 - **テスト:** 複数サーバーのテスト(`ClusterRedisTest`)は、Redisに繋がる環境(既定 `localhost:6379`。環境変数 `REDIS_HOST` / `REDIS_PORT`)でだけ実行され、なければ飛ばされる。CIでは、Redisのサービスコンテナで実行する
+
+## PostgreSQLで動かす
+
+既定はSQLite(設定なしで動く)。バックエンドを**別のマシンに分ける**ときなどは、プロファイル `postgres` でPostgreSQLを使う。SQL(クエリ)は、SQLiteとPostgreSQLの**両方で同じ**ものが動く書き方にしてあり、テーブルの定義(Flyway)だけがDBごとに分かれている(`backend/src/main/resources/db/migration/sqlite` と `postgresql`)。
+
+```bash
+# PostgreSQLを用意する(開発用)
+docker run -d --name raisechat-pg -e POSTGRES_USER=raisechat -e POSTGRES_PASSWORD=パスワード -e POSTGRES_DB=raisechat -p 5432:5432 postgres:16-alpine
+
+# バックエンドを、PostgreSQLで起動する(テーブルは、起動時にFlywayが作る)
+export SPRING_PROFILES_ACTIVE=postgres
+export SPRING_DATASOURCE_URL=jdbc:postgresql://localhost:5432/raisechat
+export SPRING_DATASOURCE_USERNAME=raisechat
+export SPRING_DATASOURCE_PASSWORD=パスワード
+cd backend && mvn spring-boot:run
+```
+
+- 接続プールは、PostgreSQLでは10本(SQLiteは、書き込みが直列なので1本)
+- 複数サーバー(Redis)と組み合わせる場合は、全サーバーに同じ接続先を設定する
+- **テストをPostgreSQLで実行する:** 環境変数 `TEST_DB_URL`(例 `jdbc:postgresql://localhost:5432/raisechat_test`)、`TEST_DB_DRIVER=org.postgresql.Driver`、`TEST_DB_POOL=10`、`TEST_DB_USER`、`TEST_DB_PASSWORD` を指定して、`mvn test` を実行する。全テストが1つのDBを共有するため、ユーザー名などは、テストごとに別の値にしてある。CIは、これを自動で実行する
+
+**既存のSQLiteのデータを移す**
+
+1. 上の手順で、**空のPostgreSQLに、バックエンドを一度起動**して、テーブルを作る(起動したら止めてよい)
+2. バックエンドを止めて、移行スクリプトを実行する(`sqlite3` と `psql` が必要)
+
+```bash
+PSQL="psql -h localhost -U raisechat -d raisechat" backend/scripts/migrate-sqlite-to-postgres.sh backend/raisechat.db
+```
+
+- データだけを移す。**全体を1つのトランザクション**で行い、途中で失敗したら、PostgreSQLには何も残らない。移行先が空でないときは、何も変更せずに止まる
+- IDはそのまま引き継ぎ、連番の続きは、最大のIDの次から始まる。最後に、テーブルごとの件数を、SQLiteとPostgreSQLで見比べて表示する
+- 添付ファイル(`uploads/`)は移さない(同じ場所を使うか、S3へ移す)
+- このスクリプトは、引用符・改行・絵文字・空文字・NULLを含むデータで、移行前後の応答が一致することを確認してある

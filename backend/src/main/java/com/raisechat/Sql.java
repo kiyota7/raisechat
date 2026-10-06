@@ -18,7 +18,7 @@ public class Sql {
 	/**
 	 * 一意制約(UNIQUE / PRIMARY KEY)に違反した例外かどうかを返す。
 	 * SQLiteの制約違反は、Springの例外変換で DuplicateKeyException にならず UncategorizedSQLException のままになるため、
-	 * 原因の SQLiteException の結果コードで判定する。
+	 * 原因の SQLiteException の結果コードで判定する(PostgreSQLなどは、標準のSQLStateでも判定する)。
 	 */
 	public static boolean isUniqueViolation(Throwable e) {
 		for (Throwable t = e; t != null; t = t.getCause()) {
@@ -26,6 +26,10 @@ public class Sql {
 				org.sqlite.SQLiteErrorCode code = se.getResultCode();
 				return code == org.sqlite.SQLiteErrorCode.SQLITE_CONSTRAINT_UNIQUE
 						|| code == org.sqlite.SQLiteErrorCode.SQLITE_CONSTRAINT_PRIMARYKEY;
+			}
+			// 標準のSQLState(PostgreSQLなど): 23505 = unique_violation
+			if (t instanceof java.sql.SQLException se && "23505".equals(se.getSQLState())) {
+				return true;
 			}
 		}
 		return false;
@@ -41,6 +45,11 @@ public class Sql {
 			}
 			return ps;
 		}, kh);
+		// SQLiteは生成IDの1列だけ、PostgreSQLは挿入した行の全列が返る。後者は id 列を取り出す
+		java.util.Map<String, Object> keys = kh.getKeys();
+		if (keys != null && keys.size() > 1) {
+			return ((Number) keys.get("id")).longValue();
+		}
 		return kh.getKey().longValue();
 	}
 }

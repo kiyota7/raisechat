@@ -15,7 +15,7 @@ import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilde
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders;
 
 /** REST APIをMockMvcで呼ぶテストの共通処理 */
-@SpringBootTest(properties = "spring.datasource.url=jdbc:sqlite:target/test-${random.uuid}.db?foreign_keys=true")
+@SpringBootTest(properties = { TestDb.URL, TestDb.DRIVER, TestDb.POOL, TestDb.USER, TestDb.PASSWORD })
 @AutoConfigureMockMvc
 abstract class ApiTestBase {
 	@Autowired
