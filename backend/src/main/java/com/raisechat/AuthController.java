@@ -1,10 +1,10 @@
 package com.raisechat;
 
-import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Size;
+import java.nio.charset.StandardCharsets;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -20,6 +20,8 @@ import org.springframework.web.multipart.MultipartFile;
 @RestController
 @RequestMapping("/api")
 public class AuthController {
+	/** BCryptが扱えるパスワードの最大バイト数 */
+	private static final int BCRYPT_MAX_BYTES = 72;
 	private static final String USERNAME_TAKEN = "このユーザーIDは既に使われています";
 	private static final String USER_SQL =
 			"SELECT id, username, display_name AS \"displayName\", status, avatar_url AS \"avatarUrl\" FROM users WHERE id = ?";
@@ -28,19 +30,15 @@ public class AuthController {
 	private final JwtService jwt;
 	private final FileStorage storage;
 	private final Realtime realtime;
-	private final LoginAttemptLimiter limiter;
-	private final RegistrationLimiter registrationLimiter;
 	private final BCryptPasswordEncoder encoder = new BCryptPasswordEncoder();
 	/** 存在しないユーザーIDのときも、パスワードの照合にかかる時間を揃えるためのダミー */
 	private final String dummyHash = encoder.encode("raisechat-dummy-password");
 
-	public AuthController(JdbcTemplate jdbc, JwtService jwt, FileStorage storage, Realtime realtime, LoginAttemptLimiter limiter, RegistrationLimiter registrationLimiter) {
+	public AuthController(JdbcTemplate jdbc, JwtService jwt, FileStorage storage, Realtime realtime) {
 		this.jdbc = jdbc;
 		this.jwt = jwt;
 		this.storage = storage;
 		this.realtime = realtime;
-		this.limiter = limiter;
-		this.registrationLimiter = registrationLimiter;
 	}
 
 	public record RegisterRequest(
@@ -61,11 +59,12 @@ public class AuthController {
 	}
 
 	@PostMapping("/auth/register")
-	public Map<String, Object> register(@Valid @RequestBody RegisterRequest req, HttpServletRequest http) {
-		registrationLimiter.attempt(http.getRemoteAddr());
-		PasswordPolicy.check(req.username(), req.password()).ifPresent(msg -> {
-			throw new ApiException(HttpStatus.BAD_REQUEST, msg);
-		});
+	public Map<String, Object> register(@Valid @RequestBody RegisterRequest req) {
+		// BCryptは72バイトを超えるパスワードを扱えず例外になる(日本語などは1文字が複数バイト)ので、400で断る
+		if (req.password().getBytes(StandardCharsets.UTF_8).length > BCRYPT_MAX_BYTES) {
+			throw new ApiException(HttpStatus.BAD_REQUEST,
+					"パスワードが長すぎます(" + BCRYPT_MAX_BYTES + "バイトまで。日本語などは1文字が複数バイトになります)");
+		}
 		String display = req.displayName() == null || req.displayName().isBlank() ? req.username() : req.displayName().trim();
 		// 先に確認する(使われていれば、パスワードのハッシュ化という重い計算をせずに済む)
 		Integer taken = jdbc.queryForObject("SELECT COUNT(*) FROM users WHERE username = ?", Integer.class, req.username());
@@ -87,19 +86,15 @@ public class AuthController {
 	}
 
 	@PostMapping("/auth/login")
-	public Map<String, Object> login(@Valid @RequestBody LoginRequest req, HttpServletRequest http) {
-		String ip = http.getRemoteAddr();
-		limiter.check(req.username(), ip);
+	public Map<String, Object> login(@Valid @RequestBody LoginRequest req) {
 		List<Map<String, Object>> rows = jdbc.queryForList(
 				"SELECT id, password_hash FROM users WHERE username = ?", req.username());
 		// 存在しないユーザーIDでも照合を行い、応答時間の差からIDの有無が分からないようにする
 		String hash = rows.isEmpty() ? dummyHash : (String) rows.get(0).get("password_hash");
 		boolean ok = encoder.matches(req.password(), hash) && !rows.isEmpty();
 		if (!ok) {
-			limiter.recordFailure(req.username(), ip);
 			throw new ApiException(HttpStatus.UNAUTHORIZED, "ユーザーIDまたはパスワードが正しくありません");
 		}
-		limiter.recordSuccess(req.username(), ip);
 		return session(((Number) rows.get(0).get("id")).longValue());
 	}
 

@@ -58,9 +58,7 @@ class ClusterRedisTest {
 	static ConfigurableApplicationContext start(String db) {
 		List<String> settings = new ArrayList<>(TestDb.settings(db));
 		settings.addAll(List.of("app.upload-dir=target/cluster-uploads", "app.jwt-secret=cluster-test-secret-0123456789abcdef0123", "app.cluster.mode=redis", "app.cluster.key-prefix=" + prefix,
-				"spring.data.redis.host=" + HOST, "spring.data.redis.port=" + REDIS_PORT,
-				
-				"app.login.max-failures=5", "app.login.ip-max-failures=1000"));
+				"spring.data.redis.host=" + HOST, "spring.data.redis.port=" + REDIS_PORT));
 		return run(settings.toArray(new String[0]));
 	}
 
@@ -129,19 +127,5 @@ class ClusterRedisTest {
 		assertNotNull(back, "サーバーBの投稿が、サーバーAに繋がった人に届く");
 		assertEquals(m2, ((Number) back.get("messageId")).longValue());
 		assertNull(next(topicA, 1), "同じ通知が重複して届かない");
-	}
-
-	@Test
-	void loginFailuresAreCountedAcrossServers() throws Exception {
-		User u = register(portA, uniq("login"));
-		for (int i = 0; i < 3; i++) {
-			assertEquals(401, http(portA, "POST", "/auth/login", null, "{\"username\":\"" + u.name() + "\",\"password\":\"wrong-" + i + "\"}").status());
-		}
-		for (int i = 0; i < 2; i++) {
-			assertEquals(401, http(portB, "POST", "/auth/login", null, "{\"username\":\"" + u.name() + "\",\"password\":\"wrong-b" + i + "\"}").status());
-		}
-		// A で3回 + B で2回 = 5回。どちらのサーバーでも、次は拒否される(正しいパスワードでも)
-		assertEquals(429, http(portA, "POST", "/auth/login", null, "{\"username\":\"" + u.name() + "\",\"password\":\"x\"}").status());
-		assertEquals(429, http(portB, "POST", "/auth/login", null, "{\"username\":\"" + u.name() + "\",\"password\":\"Cluster-Test-1x\"}").status());
 	}
 }

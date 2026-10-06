@@ -45,13 +45,13 @@ describe('Login', () => {
     expect(onLogin).toHaveBeenCalledWith(user)
   })
 
-  it('試行回数の制限(429)のメッセージを、そのまま表示する', async () => {
-    mocks.post.mockRejectedValue(new Error('ログインの試行回数が多すぎます。15分ほど待ってからもう一度お試しください'))
+  it('サーバーのエラーメッセージを、そのまま表示する', async () => {
+    mocks.post.mockRejectedValue(new Error('ユーザーIDまたはパスワードが正しくありません'))
     const u = userEvent.setup()
     render(<Login onLogin={() => {}} />)
     await fillAndSubmit(u, 'ログイン')
 
-    expect((await screen.findByRole('alert')).textContent).toContain('15分ほど待ってから')
+    expect((await screen.findByRole('alert')).textContent).toContain('正しくありません')
     expect(mocks.setToken).not.toHaveBeenCalled()
   })
 

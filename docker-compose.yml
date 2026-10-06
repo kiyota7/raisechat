@@ -36,12 +36,12 @@ services:
       SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/raisechat
       SPRING_DATASOURCE_USERNAME: raisechat
       SPRING_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD}
-      # 複数台で、通知・ログイン失敗回数をRedisで共有する
+      # 複数台で、通知をRedisで共有する
       APP_CLUSTER_MODE: redis
       SPRING_DATA_REDIS_HOST: redis
       # 全台で同じ値にする(異なると、別の台で発行したログインが無効になる)
       JWT_SECRET: ${JWT_SECRET:?.env に JWT_SECRET を設定してください}
-      # nginx(入口)が付けた X-Forwarded-For から、接続元のIPを取り出す
+      # nginx(入口)が付けた X-Forwarded-* を使う(WebSocketの接続元の判定に必要)
       SERVER_FORWARD_HEADERS_STRATEGY: native
     volumes:
       # 添付ファイルは、台数が複数でも同じ場所を使う(複数ホストにするときは、S3を使う)

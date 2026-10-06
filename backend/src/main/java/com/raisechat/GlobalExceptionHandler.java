@@ -12,7 +12,6 @@ public class GlobalExceptionHandler {
 	@ExceptionHandler(ApiException.class)
 	public ResponseEntity<Map<String, String>> handleApi(ApiException e) {
 		ResponseEntity.BodyBuilder res = ResponseEntity.status(e.getStatus());
-		e.getHeaders().forEach(res::header);
 		return res.body(Map.of("message", e.getMessage()));
 	}
 

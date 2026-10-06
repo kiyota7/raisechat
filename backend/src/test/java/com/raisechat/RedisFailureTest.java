@@ -48,29 +48,4 @@ class RedisFailureTest {
 		assertDoesNotThrow(() -> relay.deliver("これはJSONではない"));
 		verifyNoMoreInteractions(local);
 	}
-
-	@Test
-	void loginStoreFailsOpenWhenRedisIsDown() {
-		StringRedisTemplate redis = mock(StringRedisTemplate.class);
-		when(redis.opsForZSet()).thenThrow(DOWN);
-		when(redis.delete(anyString())).thenThrow(DOWN);
-		RedisLoginAttemptStore store = new RedisLoginAttemptStore(redis, "t");
-
-		assertEquals(List.of(), store.recent("u:alice|1.1.1.1", 1000, 900_000)); // 読めないときは、制限をかけずに続ける
-		assertDoesNotThrow(() -> store.add("u:alice|1.1.1.1", 1000, 900_000));
-		assertDoesNotThrow(() -> store.remove("u:alice|1.1.1.1"));
-	}
-
-	@Test
-	void limiterDoesNotBlockLoginsWhileTheStoreIsDown() {
-		StringRedisTemplate redis = mock(StringRedisTemplate.class);
-		when(redis.opsForZSet()).thenThrow(DOWN);
-		LoginAttemptLimiter limiter = new LoginAttemptLimiter(3, 10, java.time.Duration.ofMinutes(15), java.time.Clock.systemUTC(),
-				new RedisLoginAttemptStore(redis, "t"));
-
-		for (int i = 0; i < 10; i++) {
-			limiter.recordFailure("alice", "1.1.1.1");
-		}
-		assertDoesNotThrow(() -> limiter.check("alice", "1.1.1.1"));
-	}
 }
