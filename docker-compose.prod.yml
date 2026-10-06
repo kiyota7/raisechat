@@ -1,0 +1,30 @@
+# 本番用。docker-compose.yml に重ねて使う(TLS終端のCaddyを追加し、公開するのは80/443だけにする)。
+#   docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build
+# 手順は docs/本番デプロイ手順.md
+services:
+  caddy:
+    image: caddy:2-alpine
+    environment:
+      DOMAIN: ${DOMAIN:?.env に DOMAIN(例 chat.example.com)を設定してください}
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      # 取得した証明書の保存先。消すと、取得し直しになる(取得回数の上限に注意)
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - frontend
+    restart: unless-stopped
+
+  frontend:
+    # 開発用の5173の公開をやめる。外からはCaddy(443)だけを通す
+    ports: !reset []
+    volumes:
+      - ./frontend/proxy-trust.caddy.conf:/etc/nginx/proxy-trust/caddy.conf:ro
+
+volumes:
+  caddy_data:
+  caddy_config:

@@ -1,0 +1,8 @@
+# 本番の入口。独自ドメインのHTTPS証明書(Let's Encrypt)を自動で取得・更新する。
+# DOMAIN は .env で指定する(例 chat.example.com)。ローカルの検証では DOMAIN=localhost にすると、Caddyの内部CAの証明書になる。
+{$DOMAIN} {
+	encode zstd gzip
+	header Strict-Transport-Security "max-age=31536000"
+	# /api・/uploads・/ws(WebSocket)を含め、すべてnginx(frontend)へ。X-Forwarded-For/Proto/Host はCaddyが付ける
+	reverse_proxy frontend:80
+}

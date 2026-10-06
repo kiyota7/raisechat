@@ -109,6 +109,10 @@ cd backend && mvn spring-boot:run
 - **失敗回数の保存先:** 既定ではサーバーのメモリ上にあり、再起動で消える。`app.cluster.mode=redis` のときはRedisに置き、複数台の全サーバーで合算する(→ 下の「複数サーバーで動かす(Redis)」)
 - **リバースプロキシ配下で使うとき:** 既定では接続元のIPをそのまま使うので、全員がプロキシのIPとして数えられ、IPごとの制限に巻き込まれる。プロキシが `X-Forwarded-For` を付ける構成なら、`server.forward-headers-strategy=native` を設定する(プロキシ以外から直接届かないことが前提。そうでないと、ヘッダーを偽って制限を回避される)
 
+## 本番のデプロイ(HTTPS)
+
+独自ドメインで公開するときは、`docker-compose.prod.yml` を重ねて、Caddy で自動HTTPSにする。手順は [docs/本番デプロイ手順.md](docs/本番デプロイ手順.md)。
+
 ## リクエストの制限
 
 - **JSON本文の上限:** 1MB(`app.max-json-body-bytes`)。超えると413。ファイルのアップロードは別に50MBまで
