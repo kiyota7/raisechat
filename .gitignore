@@ -6,3 +6,10 @@ dist/
 uploads/
 .DS_Store
 .env
+
+# Terraform(状態ファイルと変数の実値は、git に入れない。.terraform.lock.hcl はコミットする)
+terraform/.terraform/
+terraform/*.tfstate
+terraform/*.tfstate.*
+terraform/terraform.tfvars
+terraform/*.tfvars.json
