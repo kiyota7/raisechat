@@ -1,6 +1,6 @@
 import { act, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { Chat } from './Chat'
 import type { Message, Overview, User } from './types'
 
@@ -13,7 +13,6 @@ const fake = vi.hoisted(() => {
   return {
     handlers,
     emitRaw: (dest: string, body: unknown) => handlers.get(dest)?.forEach((cb) => cb(body)),
-    send: vi.fn(),
     // テストごとに差し替えるデータ。api.get はここから返す
     data: {
       workspaces: [] as unknown[],
@@ -51,7 +50,6 @@ vi.mock('./realtime', () => ({
   startRealtime: vi.fn(),
   stopRealtime: vi.fn(),
   onReconnect: () => () => {},
-  send: fake.send,
   subscribe: (dest: string, cb: (body: unknown) => void) => {
     const set = fake.handlers.get(dest) ?? new Set()
     set.add(cb)
@@ -91,7 +89,6 @@ function msg(id: number, channelId: number, author: User, content: string, extra
 const overview1 = (): Overview => ({
   workspace: { id: 1, name: 'W1', ownerId: 1 },
   members: [me, bob],
-  onlineUserIds: [],
   channels: [channel(10, 'general'), channel(11, 'dev')],
   dms: [],
 })
@@ -108,8 +105,7 @@ function resetData() {
     2: {
       workspace: { id: 2, name: 'W2', ownerId: 1 },
       members: [me],
-      onlineUserIds: [],
-      channels: [channel(20, 'general')],
+          channels: [channel(20, 'general')],
       dms: [],
     } satisfies Overview,
   }
@@ -128,7 +124,6 @@ const emit = (dest: string, body: unknown) => act(() => fake.emitRaw(dest, body)
 const messageCalls = (channelId: number) => fake.getCalls.filter((p) => p === `/channels/${channelId}/messages`).length
 const header = () => within(screen.getByRole('banner'))
 const side = (name: string) => screen.getByRole('button', { name })
-const onlineDots = () => screen.queryAllByRole('img', { name: 'オンライン' })
 
 function renderChat() {
   return render(<Chat user={me} onUserChange={() => {}} onLogout={() => {}} />)
@@ -199,83 +194,6 @@ describe('Chat: 表示とチャンネル・ワークスペースの切り替え'
     expect(await screen.findByText('msg-in-general')).toBeTruthy()
     expect(header().getByText('# general')).toBeTruthy()
     expect(screen.queryByRole('button', { name: '# dev' })).toBeNull()
-  })
-})
-
-describe('Chat: 入力中の表示', () => {
-  beforeEach(() => {
-    // 入力中の表示は3.5秒で消えるため、時計を進めて確かめる(RTLが固まらないよう実時間でも進める)
-    vi.useFakeTimers({ shouldAdvanceTime: true })
-  })
-  afterEach(() => {
-    vi.useRealTimers()
-  })
-
-  it('他のユーザーの入力中を表示し、最後の通知から3.5秒で消す', async () => {
-    renderChat()
-    await screen.findByText('msg-in-general')
-
-    await emit('/topic/channels/10/typing', { userId: 2 })
-    expect(await screen.findByText('Bobが入力中...')).toBeTruthy()
-
-    await act(async () => {
-      vi.advanceTimersByTime(3000)
-    })
-    expect(screen.queryByText('Bobが入力中...')).toBeTruthy() // 3秒ではまだ表示
-
-    await act(async () => {
-      vi.advanceTimersByTime(700)
-    })
-    expect(screen.queryByText('Bobが入力中...')).toBeNull()
-  })
-
-  it('自分の入力中は表示しない', async () => {
-    renderChat()
-    await screen.findByText('msg-in-general')
-
-    await emit('/topic/channels/10/typing', { userId: 1 })
-    expect(screen.queryByText(/入力中/)).toBeNull()
-  })
-
-  it('入力中のユーザーが投稿したら、入力中の表示をすぐに消す', async () => {
-    renderChat()
-    await screen.findByText('msg-in-general')
-    await emit('/topic/channels/10/typing', { userId: 2 })
-    await screen.findByText('Bobが入力中...')
-
-    fake.data.messages[10] = [msg(1, 10, bob, 'msg-in-general'), msg(5, 10, bob, 'posted-while-typing')]
-    await emit('/topic/channels/10', { type: 'created', channelId: 10, messageId: 5, parentId: null })
-
-    expect(await screen.findByText('posted-while-typing')).toBeTruthy()
-    expect(screen.queryByText(/入力中/)).toBeNull()
-  })
-
-  it('入力欄に入力すると、入力中の通知を1回だけ送る', async () => {
-    const user = userEvent.setup({ delay: null })
-    renderChat()
-    await screen.findByText('msg-in-general')
-    fake.send.mockClear()
-
-    await user.type(screen.getByPlaceholderText('#general へのメッセージ'), 'hello world')
-    expect(fake.send).toHaveBeenCalledTimes(1)
-    expect(fake.send).toHaveBeenCalledWith('/app/typing', { channelId: 10 })
-  })
-})
-
-describe('Chat: オンライン表示', () => {
-  it('オンラインのユーザーの投稿に緑の点が付き、状態の変化に追従する', async () => {
-    const ov = overview1()
-    ov.onlineUserIds = [2]
-    fake.data.overviews[1] = ov
-    renderChat()
-    await screen.findByText('msg-in-general')
-    expect(onlineDots()).toHaveLength(1)
-
-    await emit('/user/queue/presence', { userId: 2, online: false })
-    expect(onlineDots()).toHaveLength(0)
-
-    await emit('/user/queue/presence', { userId: 2, online: true })
-    expect(onlineDots()).toHaveLength(1)
   })
 })
 

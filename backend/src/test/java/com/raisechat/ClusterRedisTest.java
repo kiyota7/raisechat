@@ -59,7 +59,7 @@ class ClusterRedisTest {
 		List<String> settings = new ArrayList<>(TestDb.settings(db));
 		settings.addAll(List.of("app.upload-dir=target/cluster-uploads", "app.jwt-secret=cluster-test-secret-0123456789abcdef0123", "app.cluster.mode=redis", "app.cluster.key-prefix=" + prefix,
 				"spring.data.redis.host=" + HOST, "spring.data.redis.port=" + REDIS_PORT,
-				"app.cluster.presence-ttl-ms=3000", "app.cluster.presence-heartbeat-ms=500", "app.presence.offline-grace-ms=300",
+				
 				"app.login.max-failures=5", "app.login.ip-max-failures=1000"));
 		return run(settings.toArray(new String[0]));
 	}
@@ -105,17 +105,6 @@ class ClusterRedisTest {
 		return q.poll(seconds, TimeUnit.SECONDS);
 	}
 
-	private static boolean sawPresence(BlockingQueue<Map<String, Object>> q, long userId, boolean online, long seconds) throws InterruptedException {
-		long end = System.currentTimeMillis() + seconds * 1000;
-		while (System.currentTimeMillis() < end) {
-			Map<String, Object> ev = q.poll(Math.max(1, end - System.currentTimeMillis()), TimeUnit.MILLISECONDS);
-			if (ev != null && ((Number) ev.get("userId")).longValue() == userId && Boolean.valueOf(online).equals(ev.get("online"))) {
-				return true;
-			}
-		}
-		return false;
-	}
-
 	@Test
 	void eventsReachClientsConnectedToTheOtherServer() throws Exception {
 		Space s = space();
@@ -140,70 +129,6 @@ class ClusterRedisTest {
 		assertNotNull(back, "サーバーBの投稿が、サーバーAに繋がった人に届く");
 		assertEquals(m2, ((Number) back.get("messageId")).longValue());
 		assertNull(next(topicA, 1), "同じ通知が重複して届かない");
-	}
-
-	@Test
-	void typingIsRelayedAcrossServers() throws Exception {
-		Space s = space();
-		StompSession watcher = connect(portA, s.owner().token());
-		BlockingQueue<Map<String, Object>> typing = subscribe(watcher, "/topic/channels/" + s.general() + "/typing");
-		StompSession typer = connect(portB, s.guest().token());
-		Thread.sleep(500);
-
-		typer.send("/app/typing", Map.of("channelId", s.general()));
-		Map<String, Object> ev = next(typing, 5);
-		assertNotNull(ev);
-		assertEquals(s.guest().id(), ((Number) ev.get("userId")).longValue());
-	}
-
-	@Test
-	void presenceIsSharedAndOfflineIsAnnouncedOnlyOnce() throws Exception {
-		Space s = space();
-		StompSession watcher = connect(portA, s.owner().token());
-		BlockingQueue<Map<String, Object>> presence = subscribe(watcher, "/user/queue/presence");
-		Thread.sleep(500);
-		presence.clear();
-
-		// ゲストが、サーバーAとBの両方に接続する
-		StompSession g1 = connect(portB, s.guest().token());
-		assertTrue(sawPresence(presence, s.guest().id(), true, 5), "別のサーバーでの接続が、オンラインとして伝わる");
-		StompSession g2 = connect(portA, s.guest().token());
-		assertFalse(sawPresence(presence, s.guest().id(), true, 1), "2つ目の接続では、オンラインを重ねて知らせない");
-		assertTrue(ok(portA, "GET", "/workspaces/" + s.ws(), s.owner().token(), null).get("onlineUserIds").toString().contains(String.valueOf(s.guest().id())));
-
-		// 片方を切っても、もう片方が残っている間はオンライン
-		g1.disconnect();
-		assertFalse(sawPresence(presence, s.guest().id(), false, 2), "別のサーバーの接続が残っているので、オフラインにならない");
-
-		// 両方のサーバーの接続を、ほぼ同時に切る → オフラインの通知は、1回だけ
-		StompSession g3 = connect(portB, s.guest().token());
-		presence.clear();
-		Thread t1 = new Thread(g2::disconnect), t2 = new Thread(g3::disconnect);
-		t1.start();
-		t2.start();
-		t1.join();
-		t2.join();
-		assertTrue(sawPresence(presence, s.guest().id(), false, 5), "全部切れたらオフラインを知らせる");
-		assertFalse(sawPresence(presence, s.guest().id(), false, 2), "オフラインの通知が重複しない(切り替えは1回だけ)");
-		assertFalse(ok(portA, "GET", "/workspaces/" + s.ws(), s.owner().token(), null).get("onlineUserIds").toString().contains(String.valueOf(s.guest().id())));
-	}
-
-	@Test
-	void connectionsOfACrashedServerExpireAndTheUserGoesOffline() throws Exception {
-		Space s = space();
-		StompSession watcher = connect(portA, s.owner().token());
-		BlockingQueue<Map<String, Object>> presence = subscribe(watcher, "/user/queue/presence");
-		Thread.sleep(500);
-		presence.clear();
-
-		// 落ちたサーバーの接続が残った状態を作る: オンラインの記録と、まもなく期限切れになる接続だけを、Redisに直接入れる
-		StringRedisTemplate redis = ctxA.getBean(StringRedisTemplate.class);
-		long uid = s.guest().id();
-		redis.opsForSet().add(prefix + ":presence:online", String.valueOf(uid));
-		redis.opsForZSet().add(prefix + ":presence:user:" + uid, "dead-server:s1", System.currentTimeMillis() + 800);
-
-		assertTrue(sawPresence(presence, uid, false, 8), "期限が切れると、残った記録からオフラインにされ、知らされる");
-		assertFalse(ok(portB, "GET", "/workspaces/" + s.ws(), s.owner().token(), null).get("onlineUserIds").toString().contains(String.valueOf(uid)));
 	}
 
 	@Test

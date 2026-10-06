@@ -31,7 +31,6 @@ export interface DmInfo {
 export interface Overview {
   workspace: Workspace
   members: User[]
-  onlineUserIds: number[]
   channels: ChannelInfo[]
   dms: DmInfo[]
 }

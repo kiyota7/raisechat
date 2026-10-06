@@ -9,20 +9,19 @@ export function MembersModal(props: {
   wsId: number | null
   user: User
   isOwner: boolean
-  onlineIds: Set<number>
   onOpenDm: (userId: number) => void | Promise<void>
   onChanged: () => void | Promise<void>
   onError: (message: string) => void
   onInvite: () => void
   onClose: () => void
 }) {
-  const { overview, wsId, user, isOwner, onlineIds } = props
+  const { overview, wsId, user, isOwner } = props
   return (
     <Modal title={`${overview.workspace.name} のメンバー`} onClose={props.onClose}>
       <ul className="member-list">
         {overview.members.map((m) => (
           <li key={m.id}>
-            <Avatar name={m.displayName} url={m.avatarUrl} size={32} online={onlineIds.has(m.id)} />
+            <Avatar name={m.displayName} url={m.avatarUrl} size={32} />
             <span className="grow">
               <strong>{m.displayName}</strong> <span className="muted small">@{m.username}</span>
               {m.id === overview.workspace.ownerId && <span className="owner-tag">オーナー</span>}

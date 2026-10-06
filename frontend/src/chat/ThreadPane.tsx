@@ -8,15 +8,13 @@ interface Props {
   threadId: number
   user: User
   members: User[]
-  onlineIds: Set<number>
   onClose: () => void
   onChanged: () => void
   onError: (message: string) => void
   onSend: (d: Draft, parentId: number) => Promise<void>
-  onTyping: () => void
 }
 
-export function ThreadPane({ thread, threadId, user, members, onlineIds, onClose, onChanged, onError, onSend, onTyping }: Props) {
+export function ThreadPane({ thread, threadId, user, members, onClose, onChanged, onError, onSend }: Props) {
   return (
     <aside className="thread">
       <div className="row between">
@@ -28,10 +26,10 @@ export function ThreadPane({ thread, threadId, user, members, onlineIds, onClose
       {thread ? (
         <>
           <div className="messages">
-            <MessageItem msg={thread.parent} me={user} members={members} onlineIds={onlineIds} inThread onChanged={onChanged} onError={onError} />
+            <MessageItem msg={thread.parent} me={user} members={members} inThread onChanged={onChanged} onError={onError} />
             <div className="divider muted small">{thread.replies.length}件の返信</div>
             {thread.replies.map((m) => (
-              <MessageItem key={m.id} msg={m} me={user} members={members} onlineIds={onlineIds} inThread onChanged={onChanged} onError={onError} />
+              <MessageItem key={m.id} msg={m} me={user} members={members} inThread onChanged={onChanged} onError={onError} />
             ))}
           </div>
           {!thread.parent.deleted && (
@@ -40,7 +38,6 @@ export function ThreadPane({ thread, threadId, user, members, onlineIds, onClose
               placeholder="返信する"
               members={members}
               onSend={(d) => onSend(d, thread.parent.id)}
-              onTyping={onTyping}
             />
           )}
         </>

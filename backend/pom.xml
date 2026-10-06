@@ -52,7 +52,7 @@
 			<groupId>org.flywaydb</groupId>
 			<artifactId>flyway-database-postgresql</artifactId>
 		</dependency>
-		<!-- 複数サーバー対応(app.cluster.mode=redis のときだけ使う。通知・オンライン状態・ログイン失敗回数を共有する) -->
+		<!-- 複数サーバー対応(app.cluster.mode=redis のときだけ使う。通知・ログイン失敗回数を共有する) -->
 		<dependency>
 			<groupId>org.springframework.boot</groupId>
 			<artifactId>spring-boot-starter-data-redis</artifactId>

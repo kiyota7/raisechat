@@ -11,7 +11,6 @@ interface Props {
   /** 検索結果を表示中は、選択中のチャンネルを強調しない */
   searching: boolean
   members: User[]
-  onlineIds: Set<number>
   open: boolean
   onSelectWorkspace: (id: number) => void
   onSelectChannel: (id: number) => void
@@ -20,7 +19,7 @@ interface Props {
 }
 
 export function Sidebar(p: Props) {
-  const { user, overview, channelId, searching, members, onlineIds } = p
+  const { user, overview, channelId, searching, members } = p
   return (
     <aside className={`sidebar${p.open ? ' open' : ''}`}>
       <div className="side-head">
@@ -78,7 +77,7 @@ export function Sidebar(p: Props) {
                 onClick={() => p.onSelectChannel(d.id)}
               >
                 <span>
-                  <Avatar name={u?.displayName ?? '?'} url={u?.avatarUrl ?? null} size={18} online={onlineIds.has(d.userId)} /> {u?.displayName ?? '(退会済み)'}
+                  <Avatar name={u?.displayName ?? '?'} url={u?.avatarUrl ?? null} size={18} /> {u?.displayName ?? '(退会済み)'}
                 </span>
                 {d.mentions > 0 ? (
                   <span className="badge badge-mention">@{d.mentions}</span>

@@ -42,8 +42,8 @@ class RedisFailureTest {
 		relay.deliver("{\"kind\":\"topic\",\"user\":null,\"destination\":\"/topic/channels/1\",\"payload\":{\"type\":\"created\",\"messageId\":5}}");
 		verify(local).convertAndSend(eq("/topic/channels/1"), eq(Map.of("type", "created", "messageId", 5)));
 
-		relay.deliver("{\"kind\":\"user\",\"user\":\"7\",\"destination\":\"/queue/presence\",\"payload\":{\"userId\":2,\"online\":true}}");
-		verify(local).convertAndSendToUser(eq("7"), eq("/queue/presence"), eq(Map.of("userId", 2, "online", true)));
+		relay.deliver("{\"kind\":\"user\",\"user\":\"7\",\"destination\":\"/queue/overview\",\"payload\":{\"workspaceId\":2}}");
+		verify(local).convertAndSendToUser(eq("7"), eq("/queue/overview"), eq(Map.of("workspaceId", 2)));
 
 		assertDoesNotThrow(() -> relay.deliver("これはJSONではない"));
 		verifyNoMoreInteractions(local);
@@ -72,38 +72,5 @@ class RedisFailureTest {
 			limiter.recordFailure("alice", "1.1.1.1");
 		}
 		assertDoesNotThrow(() -> limiter.check("alice", "1.1.1.1"));
-	}
-
-	private static PresenceService service(PresenceStore store) {
-		return new PresenceService(store, mock(MessageRelay.class), mock(JdbcTemplate.class), 10);
-	}
-
-	private static StompHeaderAccessor headers(StompCommand cmd, String sessionId) {
-		StompHeaderAccessor h = StompHeaderAccessor.create(cmd);
-		h.setSessionId(sessionId);
-		return h;
-	}
-
-	@Test
-	void presenceKeepsWorkingWhenItsStoreIsDown() {
-		PresenceStore store = mock(PresenceStore.class);
-		when(store.connect(anyLong(), anyString())).thenThrow(DOWN);
-		when(store.disconnect(anyString())).thenThrow(DOWN);
-		when(store.onlineAmong(any())).thenThrow(DOWN);
-		when(store.isOnline(anyLong())).thenThrow(DOWN);
-		PresenceService svc = service(store);
-
-		Principal user = () -> "7";
-		StompHeaderAccessor h = headers(StompCommand.CONNECTED, "s1");
-		var connected = new SessionConnectedEvent(this, MessageBuilder.createMessage(new byte[0], h.getMessageHeaders()), user);
-		assertDoesNotThrow(() -> svc.onConnected(connected)); // 接続を記録できなくても、WebSocketの接続は続く
-
-		var disconnect = new SessionDisconnectEvent(this, MessageBuilder.createMessage(new byte[0], headers(StompCommand.DISCONNECT, "s1").getMessageHeaders()),
-				"s1", org.springframework.web.socket.CloseStatus.NORMAL, user);
-		assertDoesNotThrow(() -> svc.onDisconnected(disconnect));
-
-		assertEquals(List.of(), svc.onlineAmong(List.of(1L, 2L))); // 概要のAPIは、全員オフラインとして返す
-		assertFalse(svc.isOnline(1L));
-		svc.shutdown();
 	}
 }

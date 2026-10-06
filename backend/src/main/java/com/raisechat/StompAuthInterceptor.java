@@ -12,12 +12,11 @@ import org.springframework.messaging.support.ChannelInterceptor;
 import org.springframework.messaging.support.MessageHeaderAccessor;
 import org.springframework.stereotype.Component;
 
-/** STOMPのJWT認証と購読の認可。クライアントからのSENDは入力中の通知(/app/typing)だけ許可する(メッセージ送信はREST) */
+/** STOMPのJWT認証と購読の認可。クライアントからのSENDは許可しない(メッセージ送信はREST) */
 @Component
 public class StompAuthInterceptor implements ChannelInterceptor {
-	/** メッセージ用(/topic/channels/{id})と入力中用(/topic/channels/{id}/typing)。どちらもチャンネルメンバーのみ */
-	private static final Pattern CHANNEL_TOPIC = Pattern.compile("^/topic/channels/(\\d+)(/typing)?$");
-	private static final String TYPING_DEST = "/app/typing";
+	/** チャンネルの通知(/topic/channels/{id})。チャンネルメンバーのみ */
+	private static final Pattern CHANNEL_TOPIC = Pattern.compile("^/topic/channels/(\\d+)$");
 
 	private final JwtService jwt;
 	private final Access access;
@@ -54,10 +53,10 @@ public class StompAuthInterceptor implements ChannelInterceptor {
 			Matcher m = CHANNEL_TOPIC.matcher(dest);
 			if (m.matches()) {
 				access.requireChannelMember(Long.parseLong(m.group(1)), Long.parseLong(user.getName()));
-			} else if (!dest.equals("/user/queue/overview") && !dest.equals("/user/queue/presence")) {
+			} else if (!dest.equals("/user/queue/overview")) {
 				throw new MessagingException("購読できません");
 			}
-		} else if (cmd == StompCommand.SEND && !TYPING_DEST.equals(acc.getDestination())) {
+		} else if (cmd == StompCommand.SEND) {
 			throw new MessagingException("クライアントからの送信はできません");
 		}
 		return message;

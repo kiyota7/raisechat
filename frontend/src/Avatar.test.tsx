@@ -12,18 +12,4 @@ describe('Avatar', () => {
     render(<Avatar name="alice" url="/uploads/a.png" />)
     expect(screen.getByAltText('alice').getAttribute('src')).toBe('/uploads/a.png')
   })
-
-  it('online が未指定ならオンライン表示の部品を付けない(従来の表示のまま)', () => {
-    const { container } = render(<Avatar name="alice" url={null} />)
-    expect(container.querySelector('.avatar-wrap')).toBeNull()
-    expect(screen.queryByRole('img', { name: 'オンライン' })).toBeNull()
-  })
-
-  it('online=true のときだけ緑の点(オンライン)を表示する', () => {
-    const { rerender } = render(<Avatar name="alice" url={null} online />)
-    expect(screen.getByRole('img', { name: 'オンライン' })).toBeTruthy()
-
-    rerender(<Avatar name="alice" url={null} online={false} />)
-    expect(screen.queryByRole('img', { name: 'オンライン' })).toBeNull()
-  })
 })
