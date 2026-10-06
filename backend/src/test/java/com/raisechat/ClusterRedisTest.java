@@ -57,7 +57,7 @@ class ClusterRedisTest {
 
 	static ConfigurableApplicationContext start(String db) {
 		List<String> settings = new ArrayList<>(TestDb.settings(db));
-		settings.addAll(List.of("app.upload-dir=target/cluster-uploads", "app.cluster.mode=redis", "app.cluster.key-prefix=" + prefix,
+		settings.addAll(List.of("app.upload-dir=target/cluster-uploads", "app.jwt-secret=cluster-test-secret-0123456789abcdef0123", "app.cluster.mode=redis", "app.cluster.key-prefix=" + prefix,
 				"spring.data.redis.host=" + HOST, "spring.data.redis.port=" + REDIS_PORT,
 				"app.cluster.presence-ttl-ms=3000", "app.cluster.presence-heartbeat-ms=500", "app.presence.offline-grace-ms=300",
 				"app.login.max-failures=5", "app.login.ip-max-failures=1000"));
