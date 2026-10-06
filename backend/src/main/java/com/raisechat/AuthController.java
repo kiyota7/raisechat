@@ -28,13 +28,13 @@ public class AuthController {
 
 	private final JdbcTemplate jdbc;
 	private final JwtService jwt;
-	private final FileStorage storage;
+	private final LocalFileStorage storage;
 	private final Realtime realtime;
 	private final BCryptPasswordEncoder encoder = new BCryptPasswordEncoder();
 	/** 存在しないユーザーIDのときも、パスワードの照合にかかる時間を揃えるためのダミー */
 	private final String dummyHash = encoder.encode("raisechat-dummy-password");
 
-	public AuthController(JdbcTemplate jdbc, JwtService jwt, FileStorage storage, Realtime realtime) {
+	public AuthController(JdbcTemplate jdbc, JwtService jwt, LocalFileStorage storage, Realtime realtime) {
 		this.jdbc = jdbc;
 		this.jwt = jwt;
 		this.storage = storage;

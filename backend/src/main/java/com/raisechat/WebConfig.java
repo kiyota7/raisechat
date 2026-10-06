@@ -15,13 +15,10 @@ import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
 public class WebConfig implements WebMvcConfigurer {
 	private final JwtService jwt;
 	private final String uploadDir;
-	private final String storageType;
 
-	public WebConfig(JwtService jwt, @Value("${app.upload-dir}") String uploadDir,
-			@Value("${app.storage.type:local}") String storageType) {
+	public WebConfig(JwtService jwt, @Value("${app.upload-dir}") String uploadDir) {
 		this.jwt = jwt;
 		this.uploadDir = uploadDir;
-		this.storageType = storageType;
 	}
 
 	@Override
@@ -54,9 +51,6 @@ public class WebConfig implements WebMvcConfigurer {
 
 	@Override
 	public void addResourceHandlers(ResourceHandlerRegistry registry) {
-		if (!"local".equals(storageType)) {
-			return; // S3モードでは UploadController が署名付きURLへリダイレクトする
-		}
 		String loc = Path.of(uploadDir).toAbsolutePath().toUri().toString();
 		registry.addResourceHandler("/uploads/**").addResourceLocations(loc);
 	}

@@ -1,23 +1,15 @@
 package com.raisechat;
 
 import static org.junit.jupiter.api.Assertions.*;
-import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.verify;
-import static org.mockito.Mockito.when;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Map;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
-import org.mockito.ArgumentCaptor;
 import org.springframework.mock.web.MockMultipartFile;
-import software.amazon.awssdk.core.sync.RequestBody;
-import software.amazon.awssdk.services.s3.S3Client;
-import software.amazon.awssdk.services.s3.model.PutObjectRequest;
 
-/** 保存先(ローカル / S3)ごとの保存処理。S3はモックのクライアントで、リクエストの中身を確認する */
+/** アップロードの保存処理(種類の判定・保存名・拒否) */
 class FileStorageTest {
 	private static final byte[] PNG = { (byte) 0x89, 'P', 'N', 'G', 0x0D, 0x0A, 0x1A, 0x0A, 1, 2, 3 };
 	private static final byte[] WEBM = { 0x1A, 0x45, (byte) 0xDF, (byte) 0xA3, 1, 2, 3, 4 };
@@ -39,32 +31,6 @@ class FileStorageTest {
 		assertTrue(res.get("url").matches("/uploads/[0-9a-f-]{36}\\.png"));
 		Path saved = dir.resolve(res.get("url").substring("/uploads/".length()));
 		assertArrayEquals(PNG, Files.readAllBytes(saved));
-	}
-
-	@Test
-	void s3StoragePutsObjectWithPrefixAndContentType() {
-		S3Client s3 = mock(S3Client.class);
-		S3FileStorage storage = new S3FileStorage(s3, "my-bucket", "uploads/");
-		Map<String, String> res = storage.save(image("a.png"), false);
-
-		ArgumentCaptor<PutObjectRequest> req = ArgumentCaptor.forClass(PutObjectRequest.class);
-		verify(s3).putObject(req.capture(), any(RequestBody.class));
-		assertEquals("my-bucket", req.getValue().bucket());
-		assertEquals("image/png", req.getValue().contentType());
-		// DBに保存するURLは保存先によらず /uploads/{ファイル名}。S3のキーはprefixが付く
-		String stored = res.get("url").substring("/uploads/".length());
-		assertTrue(stored.matches("[0-9a-f-]{36}\\.png"));
-		assertEquals("uploads/" + stored, req.getValue().key());
-	}
-
-	@Test
-	void s3FailureBecomesApiError() {
-		S3Client s3 = mock(S3Client.class);
-		when(s3.putObject(any(PutObjectRequest.class), any(RequestBody.class))).thenThrow(new RuntimeException("boom"));
-		S3FileStorage storage = new S3FileStorage(s3, "my-bucket", "uploads/");
-
-		ApiException e = assertThrows(ApiException.class, () -> storage.save(image("a.png"), false));
-		assertEquals(500, e.getStatus().value());
 	}
 
 	@Test
@@ -120,13 +86,4 @@ class FileStorageTest {
 		assertTrue(storage.save(new MockMultipartFile("file", "x", "x", WEBM), false).get("url").endsWith(".webm"));
 	}
 
-	@Test
-	void s3ContentTypeComesFromDetectedType() {
-		S3Client s3 = mock(S3Client.class);
-		S3FileStorage storage = new S3FileStorage(s3, "b", "uploads/");
-		storage.save(new MockMultipartFile("file", "a.html", "text/html", PNG), false);
-		ArgumentCaptor<PutObjectRequest> req = ArgumentCaptor.forClass(PutObjectRequest.class);
-		verify(s3).putObject(req.capture(), any(RequestBody.class));
-		assertEquals("image/png", req.getValue().contentType());
-	}
 }

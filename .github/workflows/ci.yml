@@ -18,17 +18,6 @@ jobs:
     name: Backend (mvn test)
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    # 複数サーバー(Redis)のテスト(ClusterRedisTest)用。localhost:6379 で使える。なければ、そのテストは飛ばされる
-    services:
-      redis:
-        image: redis:7-alpine
-        ports:
-          - 6379:6379
-        options: >-
-          --health-cmd "redis-cli ping"
-          --health-interval 5s
-          --health-timeout 3s
-          --health-retries 10
     defaults:
       run:
         working-directory: backend
@@ -41,107 +30,6 @@ jobs:
           cache: maven
       - name: Test
         run: mvn -B -ntp test
-
-  # 同じバックエンドのテストを、PostgreSQLでも実行する(複数サーバーのテストも、PostgreSQLとRedisを共有して実行される)
-  backend-postgres:
-    name: Backend (mvn test, PostgreSQL)
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    services:
-      postgres:
-        image: postgres:16-alpine
-        env:
-          POSTGRES_USER: raisechat
-          POSTGRES_PASSWORD: raisechat-test
-          POSTGRES_DB: raisechat_test
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd "pg_isready -U raisechat -d raisechat_test"
-          --health-interval 5s
-          --health-timeout 3s
-          --health-retries 10
-      redis:
-        image: redis:7-alpine
-        ports:
-          - 6379:6379
-        options: >-
-          --health-cmd "redis-cli ping"
-          --health-interval 5s
-          --health-timeout 3s
-          --health-retries 10
-    # CI用の使い捨てDB(サービスコンテナ内)の接続情報。テストはこの環境変数で、SQLiteの代わりにこのDBを使う
-    env:
-      TEST_DB_URL: jdbc:postgresql://localhost:5432/raisechat_test
-      TEST_DB_DRIVER: org.postgresql.Driver
-      TEST_DB_POOL: '10'
-      TEST_DB_USER: raisechat
-      TEST_DB_PASSWORD: raisechat-test
-    defaults:
-      run:
-        working-directory: backend
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: '21'
-          cache: maven
-      - name: Test
-        run: mvn -B -ntp test
-
-  # docker compose で一式を起動できること(イメージのビルド、全サービスの起動、画面とAPIへの到達)を確認する
-  docker:
-    name: Docker (compose build / smoke test)
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    env:
-      # CI用の使い捨ての値(実際の秘密情報ではない)
-      JWT_SECRET: ci-only-secret-for-compose-smoke-test-0123456789abcdef
-      POSTGRES_PASSWORD: ci-only-password
-    steps:
-      - uses: actions/checkout@v4
-      - name: Validate compose file
-        run: docker compose config -q
-      - name: Build and start
-        run: docker compose up -d --build --wait --wait-timeout 300
-      - name: Smoke test
-        run: |
-          curl -fsS -o /dev/null http://localhost:5173/
-          test "$(curl -s -o /dev/null -w '%{http_code}' http://localhost:5173/api/auth/login)" = "405"
-          # ヘルスチェックはポートが開けば通るため、Redisの購読が始まるまで少し待つ(最大60秒)
-          for i in $(seq 30); do
-            n="$(docker compose exec -T redis redis-cli pubsub numsub raisechat:events | tail -1)"
-            [ "$n" = "2" ] && break
-            sleep 2
-          done
-          test "$n" = "2"
-      - name: Production overlay (Caddy / HTTPS)
-        env:
-          DOMAIN: localhost # Caddyの内部CAの証明書で、HTTPSの経路(Caddy→nginx→backend)を検証する
-        run: |
-          docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build --wait --wait-timeout 300
-          for i in $(seq 30); do
-            [ "$(curl -sk -o /dev/null -w '%{http_code}' https://localhost/api/me)" = "401" ] && break
-            sleep 2
-          done
-          test "$(curl -sk -o /dev/null -w '%{http_code}' https://localhost/api/me)" = "401"
-          curl -skI https://localhost/ | grep -qi '^strict-transport-security:'
-          test "$(curl -s -o /dev/null -w '%{http_code}' http://localhost/)" = "308"
-          # 開発用の5173は、本番の構成では公開しない
-          ! curl -s -m 3 -o /dev/null http://localhost:5173/
-          # wss: 同じオリジンは通り、他のオリジンは断る
-          ws() { curl -sk --http1.1 -m 3 -o /dev/null -w '%{http_code}' -H 'Connection: Upgrade' -H 'Upgrade: websocket' -H 'Sec-WebSocket-Version: 13' -H 'Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==' -H "Origin: $1" https://localhost/ws; }
-          test "$(ws https://localhost)" = "101"
-          test "$(ws https://evil.example)" = "403"
-      - name: Show logs on failure
-        if: failure()
-        run: docker compose -f docker-compose.yml -f docker-compose.prod.yml logs --no-color --tail=100
-      - name: Stop
-        if: always()
-        run: docker compose -f docker-compose.yml -f docker-compose.prod.yml down -v
-        env:
-          DOMAIN: localhost
 
   frontend:
     name: Frontend (lint / test / build)
