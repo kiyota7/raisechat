@@ -42,6 +42,16 @@
 			<groupId>org.springframework.boot</groupId>
 			<artifactId>spring-boot-starter-websocket</artifactId>
 		</dependency>
+		<!-- PostgreSQL対応(spring.profiles.active=postgres のときだけ使う。既定はSQLite) -->
+		<dependency>
+			<groupId>org.postgresql</groupId>
+			<artifactId>postgresql</artifactId>
+			<scope>runtime</scope>
+		</dependency>
+		<dependency>
+			<groupId>org.flywaydb</groupId>
+			<artifactId>flyway-database-postgresql</artifactId>
+		</dependency>
 		<!-- 複数サーバー対応(app.cluster.mode=redis のときだけ使う。通知・オンライン状態・ログイン失敗回数を共有する) -->
 		<dependency>
 			<groupId>org.springframework.boot</groupId>

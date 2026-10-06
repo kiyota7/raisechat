@@ -42,6 +42,54 @@ jobs:
       - name: Test
         run: mvn -B -ntp test
 
+  # 同じバックエンドのテストを、PostgreSQLでも実行する(複数サーバーのテストも、PostgreSQLとRedisを共有して実行される)
+  backend-postgres:
+    name: Backend (mvn test, PostgreSQL)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: raisechat
+          POSTGRES_PASSWORD: raisechat-test
+          POSTGRES_DB: raisechat_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U raisechat -d raisechat_test"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+    # CI用の使い捨てDB(サービスコンテナ内)の接続情報。テストはこの環境変数で、SQLiteの代わりにこのDBを使う
+    env:
+      TEST_DB_URL: jdbc:postgresql://localhost:5432/raisechat_test
+      TEST_DB_DRIVER: org.postgresql.Driver
+      TEST_DB_POOL: '10'
+      TEST_DB_USER: raisechat
+      TEST_DB_PASSWORD: raisechat-test
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: maven
+      - name: Test
+        run: mvn -B -ntp test
+
   frontend:
     name: Frontend (lint / test / build)
     runs-on: ubuntu-latest

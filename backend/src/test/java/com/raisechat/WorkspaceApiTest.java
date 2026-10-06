@@ -158,6 +158,7 @@ class WorkspaceApiTest extends ApiTestBase {
 		post(dm, owner, "secret between us");
 
 		assertEquals(1, search(ws, guest, "hello").size());
+		assertEquals(1, search(ws, guest, "HeLLo").size()); // 英字の大文字・小文字は区別しない(SQLiteでもPostgreSQLでも同じ)
 		assertEquals(1, search(ws, guest, "100%").size()); // % はワイルドカードではない
 		assertEquals(1, search(ws, guest, "snake_case").size()); // _ もワイルドカードではない(snakeXcase に当たらない)
 		assertEquals(1, search(ws, guest, "%").size());
