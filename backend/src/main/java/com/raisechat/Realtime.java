@@ -5,6 +5,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.messaging.simp.SimpMessagingTemplate;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.support.TransactionSynchronization;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
@@ -15,11 +16,11 @@ import org.springframework.transaction.support.TransactionSynchronizationManager
  */
 @Component
 public class Realtime {
-	private final MessageRelay relay;
+	private final SimpMessagingTemplate template;
 	private final JdbcTemplate jdbc;
 
-	public Realtime(MessageRelay relay, JdbcTemplate jdbc) {
-		this.relay = relay;
+	public Realtime(SimpMessagingTemplate template, JdbcTemplate jdbc) {
+		this.template = template;
 		this.jdbc = jdbc;
 	}
 
@@ -33,7 +34,7 @@ public class Realtime {
 		List<Long> members = overview ? channelMembers(channelId) : List.of();
 		long wsId = overview ? workspaceOf(channelId) : 0;
 		afterCommit(() -> {
-			relay.toTopic("/topic/channels/" + channelId, ev);
+			template.convertAndSend("/topic/channels/" + channelId, ev);
 			sendOverview(wsId, members);
 		});
 	}
@@ -83,7 +84,7 @@ public class Realtime {
 	private void sendOverview(long workspaceId, Collection<Long> userIds, String type) {
 		Map<String, Object> payload = Map.of("type", type, "workspaceId", workspaceId);
 		for (long uid : userIds) {
-			relay.toUser(String.valueOf(uid), "/queue/overview", payload);
+			template.convertAndSendToUser(String.valueOf(uid), "/queue/overview", payload);
 		}
 	}
 

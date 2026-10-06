@@ -24,7 +24,7 @@ public class JwtService {
 		if (isProductionLike(env)) {
 			if (DEV_DEFAULT_SECRET.equals(secret)) {
 				throw new IllegalStateException(
-						"JWT_SECRET が開発用の既定値のままです。本番相当の構成(postgres プロファイル / app.cluster.mode=redis)では、推測されない秘密鍵を JWT_SECRET に設定してください");
+						"JWT_SECRET が開発用の既定値のままです。prod プロファイル(SPRING_PROFILES_ACTIVE=prod)では、推測されない秘密鍵を JWT_SECRET に設定してください");
 			}
 			if (secret.getBytes(StandardCharsets.UTF_8).length < MIN_PRODUCTION_SECRET_BYTES) {
 				throw new IllegalStateException("JWT_SECRET は32バイト以上にしてください");
@@ -33,9 +33,9 @@ public class JwtService {
 		this.key = Keys.hmacShaKeyFor(secret.getBytes(StandardCharsets.UTF_8));
 	}
 
-	/** PostgreSQL(postgres プロファイル)や複数台構成(Redis)は、本番相当とみなす */
+	/** prod プロファイルは、本番とみなす(既定値や短い鍵では起動させない) */
 	private static boolean isProductionLike(Environment env) {
-		return env.acceptsProfiles(Profiles.of("postgres")) || "redis".equals(env.getProperty("app.cluster.mode"));
+		return env.acceptsProfiles(Profiles.of("prod"));
 	}
 
 	public String issue(long userId) {
