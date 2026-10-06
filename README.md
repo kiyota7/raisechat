@@ -106,8 +106,13 @@ cd backend && mvn spring-boot:run
 - 存在しないユーザーIDも同じように数え、パスワードの照合にかかる時間も揃えて、IDの有無が分からないようにしている
 - 設定: `app.login.max-failures`(5)、`app.login.ip-max-failures`(20)、`app.login.window-minutes`(15)。環境変数なら `APP_LOGIN_MAX_FAILURES` など
 - 登録APIも、同じIPからの試行を制限する(成功・失敗とも数える)。`app.register.max-per-ip`(10)、`app.register.window-minutes`(60)。超えると429(Retry-Afterつき)。複数台のときはRedisで共有する
-- **失敗回数はサーバーのメモリ上**にある。再起動で消え、サーバーを複数台にする場合は、台ごとに数える(共有するにはRedisなどが必要)
+- **失敗回数の保存先:** 既定ではサーバーのメモリ上にあり、再起動で消える。`app.cluster.mode=redis` のときはRedisに置き、複数台の全サーバーで合算する(→ 下の「複数サーバーで動かす(Redis)」)
 - **リバースプロキシ配下で使うとき:** 既定では接続元のIPをそのまま使うので、全員がプロキシのIPとして数えられ、IPごとの制限に巻き込まれる。プロキシが `X-Forwarded-For` を付ける構成なら、`server.forward-headers-strategy=native` を設定する(プロキシ以外から直接届かないことが前提。そうでないと、ヘッダーを偽って制限を回避される)
+
+## リクエストの制限
+
+- **JSON本文の上限:** 1MB(`app.max-json-body-bytes`)。超えると413。ファイルのアップロードは別に50MBまで
+- **WebSocketの接続元:** 既定では、画面と同じオリジンからの接続だけ許可する。別のオリジンから使うときは `app.websocket.allowed-origins`(カンマ区切り、例 `https://chat.example.com`)に指定する。nginxは、Host(ポート付き)とX-Forwarded-Portを渡して、この判定が合うようにしている
 
 ## 複数サーバーで動かす(Redis)
 
