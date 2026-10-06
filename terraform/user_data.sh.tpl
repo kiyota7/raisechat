@@ -4,6 +4,8 @@
 # 秘密情報(JWT秘密鍵)は、Terraformの値(=stateファイル)に載せず、データ用ボリュームの上で生成する。
 set -euxo pipefail
 exec > >(tee -a /var/log/raisechat-bootstrap.log) 2>&1
+# 作るファイルの権限を、明示する(後続のファイルが、意図せず root 専用にならないように)
+umask 022
 
 SITE_ADDRESS="${site_address}"
 BUCKET="${artifacts_bucket}"
@@ -47,9 +49,9 @@ mkdir -p "$DATA_DIR/uploads" /opt/raisechat/web /etc/raisechat
 chown -R raisechat:raisechat "$DATA_DIR"
 
 # JWT秘密鍵: データ用ボリュームに、初回だけ生成する(インスタンスを作り直しても変わらない)
+# 秘密鍵のファイルだけを所有者専用にする。umask はサブシェルに閉じ込める(スクリプトの後ろに漏らさない)
 if [ ! -s "$DATA_DIR/jwt_secret" ]; then
-  umask 077
-  head -c 48 /dev/urandom | base64 -w0 > "$DATA_DIR/jwt_secret"
+  (umask 077; head -c 48 /dev/urandom | base64 -w0 > "$DATA_DIR/jwt_secret")
   chown raisechat:raisechat "$DATA_DIR/jwt_secret"
 fi
 
@@ -132,6 +134,11 @@ $SITE_ADDRESS {
 	}
 }
 CADDYEOF
+
+# Caddyは caddy ユーザーで動くので、設定ファイルを読める権限にして、そのユーザーで読めることを確認する
+chmod 755 /etc/caddy
+chmod 644 /etc/caddy/Caddyfile
+runuser -u caddy -- env XDG_DATA_HOME=/var/lib/caddy /usr/local/bin/caddy validate --config /etc/caddy/Caddyfile
 
 cat > /etc/systemd/system/caddy.service <<'UNITEOF'
 [Unit]
