@@ -36,6 +36,7 @@ GitHub Actions(`.github/workflows/ci.yml`)が、PRと `main` へのpushのたび
 |---|---|
 | Backend | `cd backend && mvn test`(Java 21。複数サーバーのテストのため、Redisのサービスコンテナを使う) |
 | Backend (PostgreSQL) | 同じテストを、PostgreSQLのサービスコンテナで実行する(下記「PostgreSQLで動かす」の環境変数 `TEST_DB_*`) |
+| Docker | `docker compose` で、イメージのビルドと、全サービスの起動、画面とAPIへの到達、バックエンド2台のRedis購読を確認する |
 | Frontend | `cd frontend && npm ci && npm run lint && npm test && npm run build`(Node 24) |
 
 手元で同じ確認をするには、上のコマンドをそのまま実行する。リントは `--deny-warnings` のため、**警告(warning)があっても失敗する**。やむを得ず抑制する場合は、`oxlint-disable-next-line` に理由のコメントを添える。
@@ -175,3 +176,28 @@ PSQL="psql -h localhost -U raisechat -d raisechat" backend/scripts/migrate-sqlit
 - IDはそのまま引き継ぎ、連番の続きは、最大のIDの次から始まる。最後に、テーブルごとの件数を、SQLiteとPostgreSQLで見比べて表示する
 - 添付ファイル(`uploads/`)は移さない(同じ場所を使うか、S3へ移す)
 - このスクリプトは、引用符・改行・絵文字・空文字・NULLを含むデータで、移行前後の応答が一致することを確認してある
+
+## Docker Composeで一式を動かす
+
+PostgreSQL・Redis・バックエンド(既定2台)・フロントエンド(nginx)を、1コマンドで起動できる。JavaやNodeが入っていなくても動く(ビルドもDockerの中で行う)。
+
+```bash
+cp .env.example .env     # JWT_SECRET と POSTGRES_PASSWORD を設定する(未設定だと、起動時にエラーになる)
+docker compose up --build
+```
+
+画面は http://localhost:5173 。
+
+| サービス | 内容 |
+|---|---|
+| `frontend` | nginx。画面を配信し、`/api`・`/uploads`・`/ws`(WebSocket)をバックエンドへ中継する。**公開するのは、このポート(5173)だけ** |
+| `backend` | 既定2台。`BACKEND_REPLICAS` で台数を変えられる。通知・オンライン状態・ログイン失敗回数は、Redisで共有する |
+| `postgres` / `redis` | データは、`pgdata` ボリュームに保存される |
+
+- **秘密情報:** `JWT_SECRET`(例 `openssl rand -base64 48`)と `POSTGRES_PASSWORD` は、`.env` で必ず指定する(既定値は置いていない)。`.env` は、gitに入らない
+- **ポート:** 5173が使用中(ローカルの開発用サーバーなど)だと、起動に失敗する。別のポートに逃がさず、先に止める
+- **データ:** `docker compose down` では、データ(PostgreSQL・添付ファイル)は残る。**`docker compose down -v` は、データも削除する**
+- **接続元のIP:** nginxが `X-Forwarded-For` を付け、バックエンドは `SERVER_FORWARD_HEADERS_STRATEGY=native` で、それを使う(ログイン失敗の回数制限が、接続元ごとに働く)。ただし、nginxの手前にさらにプロキシを置く場合は、そのプロキシのIPで数えられる
+- **添付ファイル:** バックエンドの複数台で、同じボリュームを共有する(同じマシンの中だけ)。複数ホストに分けるときは、S3を使う
+- ログ: `docker compose logs -f backend` / 状態: `docker compose ps`
+- 環境の作り方・構成の詳細は、上の「複数サーバーで動かす」「PostgreSQLで動かす」を参照
