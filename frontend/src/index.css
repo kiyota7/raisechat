@@ -12,6 +12,7 @@
   --primary-hover: #005e46;
   --danger: #c0262d;
   --mention-bg: #fff3c4;
+  --link: #1264a3;
   --logo: #3f0e40;
   font-family: -apple-system, BlinkMacSystemFont, 'Hiragino Sans', 'Noto Sans JP', 'Segoe UI', sans-serif;
   color: var(--text);
@@ -26,6 +27,7 @@
     --text: #e8e8e8;
     --muted: #9a9ba0;
     --mention-bg: #4a3f10;
+    --link: #6cb6ff;
     --logo: #d9a8db;
   }
 }
@@ -79,7 +81,7 @@ button.danger {
 button.link {
   border: 0;
   background: none;
-  color: #1264a3;
+  color: var(--link);
   padding: 2px 0;
   text-align: left;
 }
@@ -444,6 +446,12 @@ label.check input {
 }
 .md p {
   margin: 2px 0;
+}
+.md a {
+  color: var(--link);
+}
+.md a:hover {
+  text-decoration: underline;
 }
 .md pre {
   background: var(--bg-alt);
