@@ -1,0 +1,8 @@
+# コピーして terraform.tfvars にして使う(terraform.tfvars は git に入れない)
+aws_region = "ap-northeast-1"
+
+# instance_type    = "t3.micro" # 負荷が増えたら t3.small などに上げる
+# data_volume_size = 10
+
+# ドメインを取得したら設定する(空の間は <IP>.sslip.io で動く)
+# domain = "chat.example.com"

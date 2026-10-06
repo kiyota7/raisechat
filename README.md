@@ -39,6 +39,10 @@ GitHub Actions(`.github/workflows/ci.yml`)が、PRと `main` へのpushのたび
 
 手元で同じ確認をするには、上のコマンドをそのまま実行する。リントは `--deny-warnings` のため、**警告(warning)があっても失敗する**。やむを得ず抑制する場合は、`oxlint-disable-next-line` に理由のコメントを添える。
 
+## デプロイ(AWS)
+
+AWS の EC2 1台に、Terraform で構築して公開できる(自動HTTPS)。手順は [docs/AWSデプロイ手順.md](docs/AWSデプロイ手順.md)。
+
 ## 実装済み機能
 
 - **認証・ユーザー**: 新規登録 / ログイン / ログアウト / プロフィール(アバター画像・表示名・ステータス)
