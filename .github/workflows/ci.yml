@@ -90,6 +90,33 @@ jobs:
       - name: Test
         run: mvn -B -ntp test
 
+  # docker compose で一式を起動できること(イメージのビルド、全サービスの起動、画面とAPIへの到達)を確認する
+  docker:
+    name: Docker (compose build / smoke test)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      # CI用の使い捨ての値(実際の秘密情報ではない)
+      JWT_SECRET: ci-only-secret-for-compose-smoke-test-0123456789abcdef
+      POSTGRES_PASSWORD: ci-only-password
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate compose file
+        run: docker compose config -q
+      - name: Build and start
+        run: docker compose up -d --build --wait --wait-timeout 300
+      - name: Smoke test
+        run: |
+          curl -fsS -o /dev/null http://localhost:5173/
+          test "$(curl -s -o /dev/null -w '%{http_code}' http://localhost:5173/api/auth/login)" = "405"
+          test "$(docker compose exec -T redis redis-cli pubsub numsub raisechat:events | tail -1)" = "2"
+      - name: Show logs on failure
+        if: failure()
+        run: docker compose logs --no-color --tail=100
+      - name: Stop
+        if: always()
+        run: docker compose down -v
+
   frontend:
     name: Frontend (lint / test / build)
     runs-on: ubuntu-latest
