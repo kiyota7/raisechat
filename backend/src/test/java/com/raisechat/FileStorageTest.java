@@ -19,8 +19,15 @@ import software.amazon.awssdk.services.s3.model.PutObjectRequest;
 
 /** 保存先(ローカル / S3)ごとの保存処理。S3はモックのクライアントで、リクエストの中身を確認する */
 class FileStorageTest {
+	private static final byte[] PNG = { (byte) 0x89, 'P', 'N', 'G', 0x0D, 0x0A, 0x1A, 0x0A, 1, 2, 3 };
+	private static final byte[] WEBM = { 0x1A, 0x45, (byte) 0xDF, (byte) 0xA3, 1, 2, 3, 4 };
+
 	private static MockMultipartFile image(String name) {
-		return new MockMultipartFile("file", name, "image/png", new byte[] { 1, 2, 3 });
+		return new MockMultipartFile("file", name, "image/png", PNG);
+	}
+
+	private static byte[] bytes(String s) {
+		return s.getBytes(java.nio.charset.StandardCharsets.ISO_8859_1);
 	}
 
 	@Test
@@ -31,7 +38,7 @@ class FileStorageTest {
 		assertEquals("image", res.get("type"));
 		assertTrue(res.get("url").matches("/uploads/[0-9a-f-]{36}\\.png"));
 		Path saved = dir.resolve(res.get("url").substring("/uploads/".length()));
-		assertArrayEquals(new byte[] { 1, 2, 3 }, Files.readAllBytes(saved));
+		assertArrayEquals(PNG, Files.readAllBytes(saved));
 	}
 
 	@Test
@@ -64,11 +71,62 @@ class FileStorageTest {
 	void rejectsNonMediaAndNonImageAvatars(@TempDir Path dir) {
 		LocalFileStorage storage = new LocalFileStorage(dir.toString());
 		MockMultipartFile text = new MockMultipartFile("file", "a.txt", "text/plain", new byte[] { 1 });
-		MockMultipartFile video = new MockMultipartFile("file", "a.webm", "video/webm", new byte[] { 1 });
+		MockMultipartFile video = new MockMultipartFile("file", "a.webm", "video/webm", WEBM);
 
 		assertEquals(400, assertThrows(ApiException.class, () -> storage.save(text, false)).getStatus().value());
 		// アバターは画像のみ
 		assertEquals(400, assertThrows(ApiException.class, () -> storage.save(video, true)).getStatus().value());
 		assertEquals("video", storage.save(video, false).get("type"));
+	}
+
+	@Test
+	void rejectsHtmlDisguisedAsImage(@TempDir Path dir) {
+		LocalFileStorage storage = new LocalFileStorage(dir.toString());
+		var html = new MockMultipartFile("file", "poc.html", "image/png", bytes("<html><script>alert(1)</script></html>"));
+		assertEquals(400, assertThrows(ApiException.class, () -> storage.save(html, false)).getStatus().value());
+		assertEquals(0, dir.toFile().list() == null ? 0 : dir.toFile().list().length);
+	}
+
+	@Test
+	void rejectsSvgEvenWithImageContentType(@TempDir Path dir) {
+		LocalFileStorage storage = new LocalFileStorage(dir.toString());
+		var svg = new MockMultipartFile("file", "a.svg", "image/svg+xml",
+				bytes("<svg xmlns=\"http://www.w3.org/2000/svg\"><script>alert(1)</script></svg>"));
+		assertEquals(400, assertThrows(ApiException.class, () -> storage.save(svg, false)).getStatus().value());
+	}
+
+	@Test
+	void extensionComesFromDetectedTypeNotFileName(@TempDir Path dir) {
+		LocalFileStorage storage = new LocalFileStorage(dir.toString());
+		var f = new MockMultipartFile("file", "evil.html", "text/html", PNG);
+		Map<String, String> res = storage.save(f, false);
+		assertEquals("image", res.get("type"));
+		assertTrue(res.get("url").matches("/uploads/[0-9a-f-]{36}\\.png"), res.get("url"));
+	}
+
+	@Test
+	void detectsSupportedFormats(@TempDir Path dir) {
+		LocalFileStorage storage = new LocalFileStorage(dir.toString());
+		byte[] jpg = { (byte) 0xFF, (byte) 0xD8, (byte) 0xFF, (byte) 0xE0, 0, 0 };
+		byte[] gif = bytes("GIF89a....");
+		byte[] webp = bytes("RIFF\u0001\u0002\u0003\u0004WEBPVP8 ");
+		byte[] mp4 = bytes("\0\0\0\u0018ftypisom\0\0\0\0");
+		assertTrue(storage.save(new MockMultipartFile("file", "x", "x", jpg), false).get("url").endsWith(".jpg"));
+		assertTrue(storage.save(new MockMultipartFile("file", "x", "x", gif), false).get("url").endsWith(".gif"));
+		assertTrue(storage.save(new MockMultipartFile("file", "x", "x", webp), false).get("url").endsWith(".webp"));
+		Map<String, String> v = storage.save(new MockMultipartFile("file", "x", "x", mp4), false);
+		assertTrue(v.get("url").endsWith(".mp4"));
+		assertEquals("video", v.get("type"));
+		assertTrue(storage.save(new MockMultipartFile("file", "x", "x", WEBM), false).get("url").endsWith(".webm"));
+	}
+
+	@Test
+	void s3ContentTypeComesFromDetectedType() {
+		S3Client s3 = mock(S3Client.class);
+		S3FileStorage storage = new S3FileStorage(s3, "b", "uploads/");
+		storage.save(new MockMultipartFile("file", "a.html", "text/html", PNG), false);
+		ArgumentCaptor<PutObjectRequest> req = ArgumentCaptor.forClass(PutObjectRequest.class);
+		verify(s3).putObject(req.capture(), any(RequestBody.class));
+		assertEquals("image/png", req.getValue().contentType());
 	}
 }

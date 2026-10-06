@@ -1,7 +1,6 @@
 package com.raisechat;
 
 import java.io.IOException;
-import java.util.Locale;
 import java.util.Map;
 import java.util.UUID;
 import org.springframework.http.HttpStatus;
@@ -11,24 +10,26 @@ import org.springframework.web.multipart.MultipartFile;
 abstract class AbstractFileStorage implements FileStorage {
 	@Override
 	public Map<String, String> save(MultipartFile file, boolean imageOnly) {
-		String ct = file.getContentType() == null ? "" : file.getContentType();
-		String type = ct.startsWith("image/") ? "image" : ct.startsWith("video/") ? "video" : null;
-		if (type == null || (imageOnly && !type.equals("image"))) {
+		MediaSniffer.Detected d;
+		try {
+			d = MediaSniffer.detect(file).orElse(null);
+		} catch (IOException e) {
+			throw new ApiException(HttpStatus.INTERNAL_SERVER_ERROR, "ファイルの保存に失敗しました");
+		}
+		if (d == null || (imageOnly && !d.kind().equals("image"))) {
 			throw new ApiException(HttpStatus.BAD_REQUEST,
 					imageOnly ? "画像ファイルを選択してください" : "画像または動画ファイルを選択してください");
 		}
-		String name = file.getOriginalFilename() == null ? "" : file.getOriginalFilename();
-		int dot = name.lastIndexOf('.');
-		String ext = dot >= 0 ? name.substring(dot + 1).toLowerCase(Locale.ROOT).replaceAll("[^a-z0-9]", "") : "";
-		String stored = UUID.randomUUID() + (ext.isEmpty() ? "" : "." + ext);
+		// 拡張子と Content-Type は、申告ではなく判定した内容から決める
+		String stored = UUID.randomUUID() + "." + d.ext();
 		try {
-			write(stored, file);
+			write(stored, file, d.contentType());
 		} catch (IOException | RuntimeException e) {
 			throw new ApiException(HttpStatus.INTERNAL_SERVER_ERROR, "ファイルの保存に失敗しました");
 		}
-		return Map.of("url", "/uploads/" + stored, "type", type);
+		return Map.of("url", "/uploads/" + stored, "type", d.kind());
 	}
 
-	/** 保存名(UUID+拡張子)でファイルを書き込む */
-	protected abstract void write(String storedName, MultipartFile file) throws IOException;
+	/** 保存名(UUID+拡張子)でファイルを書き込む。contentType は判定した値 */
+	protected abstract void write(String storedName, MultipartFile file, String contentType) throws IOException;
 }

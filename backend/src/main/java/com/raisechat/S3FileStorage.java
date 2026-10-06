@@ -26,9 +26,9 @@ public class S3FileStorage extends AbstractFileStorage {
 	}
 
 	@Override
-	protected void write(String storedName, MultipartFile file) throws IOException {
+	protected void write(String storedName, MultipartFile file, String contentType) throws IOException {
 		PutObjectRequest req = PutObjectRequest.builder().bucket(bucket).key(prefix + storedName)
-				.contentType(file.getContentType()).build();
+				.contentType(contentType).build();
 		try (InputStream in = file.getInputStream()) {
 			s3.putObject(req, RequestBody.fromInputStream(in, file.getSize()));
 		}
