@@ -110,6 +110,13 @@ sudo journalctl -u caddy -n 100 --no-pager       # 証明書・中継のログ
 sudo cat /var/log/raisechat-bootstrap.log        # 初回起動スクリプトのログ
 ```
 
+- **一時停止・再開:** 使わない間は、EC2 を止めて稼働料金を止められる。
+  ```bash
+  ./deploy/power.sh status    # 今の状態(running / stopped)とアプリの応答を表示
+  ./deploy/power.sh stop      # 停止する(アプリは開けなくなる。確認あり。YES=1 で確認を省く)
+  ./deploy/power.sh start     # 再開して、アプリが応答するまで待つ(1〜2分)
+  ```
+  データ(DB・添付ファイル・ログイン情報)は、データ用EBSに残り、公開IP(Elastic IP)も変わらないので、再開すればそのまま使える(DNSの変更も不要)。**停止中も、EBS・Elastic IP・ホストゾーン・ドメインの料金は続く。** 停止中は `terraform apply` を実行せず、再開してから行う。「終了(Terminate)」は、インスタンスが削除されるので、使わない。
 - **バックアップ:** データ用EBSの日次スナップショット(7世代)が自動で作られる(03:00 JST)。手動で取るには、コンソールかCLIで `Snapshot=raisechat` タグのボリュームのスナップショットを作る。
 - **復元:** スナップショットから新しいボリュームを作り、`terraform` の管理に取り込むか、インスタンスを止めてボリュームを差し替える。大きな操作なので、事前に手順を練習しておく。
 - **スケールアップ:** `terraform.tfvars` の `instance_type` を上げて `terraform apply`(再起動で数分止まる)。データ容量は、`data_volume_size` を増やす(減らすことはできない。増やしたあとは、インスタンス内で `sudo xfs_growfs /var/lib/raisechat`)。
