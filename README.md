@@ -102,3 +102,7 @@ AWS の EC2 1台に、Terraform で構築して公開できる(自動HTTPS)。�
 
 - **JSON本文の上限:** 1MB(`app.max-json-body-bytes`)。超えると413。ファイルのアップロードは別に50MBまで
 - **WebSocketの接続元:** 既定では、画面と同じオリジンからの接続だけ許可する。別のオリジンから使うときは `app.websocket.allowed-origins`(カンマ区切り、例 `https://chat.example.com`)に指定する。
+
+## ライセンス
+
+[MIT License](LICENSE)
