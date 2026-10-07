@@ -52,13 +52,50 @@ SKIP_TESTS=1 ./deploy/deploy.sh    # テストを省く場合
 
 sslip.io は、IPアドレスをそのまま名前にする無料の仕組みで、ドメイン未取得の間の検証に使う。Let's Encrypt の発行回数制限が、他の利用者と共有で影響することがあるので、**本番では、自分のドメインを使う**。
 
-1. ドメインを取得し、DNS の **A レコード**を、`terraform output public_ip` のIPに向ける
-2. `terraform.tfvars` に `domain = "chat.example.com"` を書く
-3. 起動スクリプトは初回起動のときだけ実行されるため、インスタンスを作り直して反映する(**数分のダウンタイム。データ・ログイン情報は、データ用EBSに残る**):
-   ```bash
-   cd terraform && terraform apply -replace=aws_instance.app
-   cd .. && ./deploy/deploy.sh
-   ```
+### 5-1. ドメインを取得する
+
+ドメインは、レジストラ(ドメインの販売事業者)で購入する(有料。年額は、種類(`.com` `.jp` など)で変わる)。AWS で完結させたいなら **Route 53**、ほかに、お名前.com、Cloudflare Registrar などがある。購入は、あなたの操作で行う。
+
+### 5-2. DNS の A レコードを設定する
+
+レジストラ(または Route 53)のDNS設定で、使いたい名前(例 `chat.example.com`)の **A レコード**を作り、値を、サーバーの **Elastic IP** にする。
+
+```bash
+cd terraform && terraform output public_ip     # このIPを、Aレコードの値にする
+```
+
+反映には、数分〜数十分かかることがある。確認:
+
+```bash
+dig +short A chat.example.com                  # Elastic IP が表示されれば、反映済み
+```
+
+### 5-3. 切り替える(ダウンタイムはほぼなし。インスタンスは作り直さない)
+
+```bash
+./deploy/set-domain.sh chat.example.com
+```
+
+スクリプトが、次を行う。
+1. DNS が、このサーバーのIPを向いているか確認する(向いていなければ、中止する)。
+2. 稼働中のインスタンスの Caddy の設定(サイトの名前)と、WebSocket の許可オリジンを書き換えて、再起動する。
+3. `https://chat.example.com/api/me` が 401 を返すまで待つ。証明書は、そのとき自動で取得される(1〜2分)。
+
+`DRY_RUN=1 ./deploy/set-domain.sh chat.example.com` で、送る内容だけ確認できる。**切り替え後は、sslip.io のURLでは開けなくなる**(ブックマークは、新しいURLに更新する)。
+
+### 5-4. Terraform の記録を合わせる
+
+`terraform/terraform.tfvars` に書いて、`apply` する。**稼働中のインスタンスは変更されない**(起動スクリプトは初回だけ実行されるため)。これは、今後インスタンスを作り直したときに、同じドメインで立ち上がるようにするための記録。
+
+```hcl
+domain = "chat.example.com"
+```
+
+```bash
+cd terraform && terraform apply
+```
+
+(インスタンスを作り直して反映する方法もある: `terraform apply -replace=aws_instance.app`。数分のダウンタイムがあり、データとログイン情報は、データ用EBSに残る。)
 
 ## 6. 運用
 
