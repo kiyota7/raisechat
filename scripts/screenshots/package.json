@@ -1,0 +1,12 @@
+{
+  "name": "raisechat-screenshots",
+  "private": true,
+  "type": "module",
+  "description": "README用スクリーンショットの自動撮影(Playwright)",
+  "scripts": {
+    "capture": "node capture.mjs"
+  },
+  "devDependencies": {
+    "playwright": "1.49.1"
+  }
+}
